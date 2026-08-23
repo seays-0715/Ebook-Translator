@@ -32,14 +32,18 @@ class TranslationEngine:
         storage: Storage,
         job: TranslationJob,
         *,
-        glossary_entries: list[dict[str, str]] | None = None,
-        system_prompt: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> None:
+        """Execute using Job snapshot only (config + book + glossary_entries).
+
+        Glossary and prompt come from job.config; callers cannot override them
+        for an existing job (spec: immutable after first execution).
+        """
         self.storage = storage
         self.job = job
-        self.glossary_entries = glossary_entries or []
-        self.system_prompt = system_prompt or job.config.prompt or DEFAULT_SYSTEM_PROMPT
+        # Always from Job snapshot — never current/global glossary
+        self.glossary_entries = list(job.config.glossary_entries or [])
+        self.system_prompt = job.config.prompt or DEFAULT_SYSTEM_PROMPT
         self.on_progress = on_progress
         self._stop_requested = False
         self._pause_requested = False
