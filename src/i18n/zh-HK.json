@@ -85,6 +85,8 @@
   "label_style": "風格",
   "label_chunk_tokens": "Chunk 目標 tokens",
   "label_carry_over": "延續段落數",
+  "label_prompt": "系統提示詞（可選）",
+  "hint_prompt": "留空則使用內建預設。只影響新建的 Job。",
   "label_timeout": "逾時（秒）",
   "label_retry_count": "重試次數",
   "label_retry_delay": "重試延遲（秒）",

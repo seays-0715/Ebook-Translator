@@ -85,6 +85,8 @@
   "label_style": "Style",
   "label_chunk_tokens": "Chunk target tokens",
   "label_carry_over": "Carry-over paragraphs",
+  "label_prompt": "System prompt (optional)",
+  "hint_prompt": "Leave empty to use the built-in default. Applied to new jobs only.",
   "label_timeout": "Timeout (seconds)",
   "label_retry_count": "Retry count",
   "label_retry_delay": "Retry delay (seconds)",
