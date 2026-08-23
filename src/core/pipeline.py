@@ -45,28 +45,52 @@ def parse_to_book(source: str | Path, assets_dir: Path | None = None):
 
 
 def create_translation_job(
-    source: str | Path,
+    source: str | Path | None,
     storage: Storage,
     config: JobConfig,
     *,
     work_dir: Path,
+    book=None,
     glossary_entries: list[dict[str, str]] | None = None,
     glossary_version: str | None = None,
 ) -> TranslationJob:
     """Create job with full immutable config + book snapshot.
 
-    Original input is only read (parser → assets under work_dir).
-    Optional glossary_entries are frozen into config at creation time.
+    Prefer an already-normalized Canonical Book (from Preview corrections).
+    Only re-parse *source* when *book* is not provided.
+
+    Original input is never modified. Optional glossary_entries are frozen
+    into config at creation time.
     """
-    source = Path(source)
+    from src.models.book import CanonicalBook
+
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     assets_dir = work_dir / "assets"
     assets_dir.mkdir(exist_ok=True)
 
-    result = parse_to_book(source, assets_dir=assets_dir)
+    if book is not None:
+        if not isinstance(book, CanonicalBook):
+            raise TypeError("book must be a CanonicalBook")
+        snapshot = CanonicalBook.model_validate(book.model_dump())
+        new_assets: dict[str, str] = {}
+        for key, rel in (snapshot.assets or {}).items():
+            src_path = Path(rel)
+            if src_path.is_file():
+                dest = assets_dir / src_path.name
+                if src_path.resolve() != dest.resolve():
+                    dest.write_bytes(src_path.read_bytes())
+                new_assets[key] = str(dest)
+            else:
+                new_assets[key] = rel
+        snapshot = snapshot.model_copy(update={"assets": new_assets})
+    else:
+        if source is None:
+            raise ValueError("Either book or source must be provided")
+        source = Path(source)
+        result = parse_to_book(source, assets_dir=assets_dir)
+        snapshot = result.book
 
-    # Freeze glossary into config snapshot (copy; do not keep live reference)
     if glossary_entries is not None:
         config = config.model_copy(
             update={
@@ -78,14 +102,14 @@ def create_translation_job(
         config = config.model_copy(update={"glossary_version": glossary_version})
 
     job_id = str(uuid4())
-    book_id = job_id  # 1:1 book snapshot owned by this job
-    storage.save_book(result.book, book_id=book_id)
+    book_id = job_id
+    storage.save_book(snapshot, book_id=book_id)
     now = datetime.now(timezone.utc).isoformat()
     job = TranslationJob(
         job_id=job_id,
         status=JobStatus.PENDING,
         config=config,
-        book=result.book,
+        book=snapshot,
         storage_dir=str(work_dir),
         created_at=now,
         updated_at=now,
