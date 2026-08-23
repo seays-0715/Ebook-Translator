@@ -204,7 +204,7 @@ class BatchQueue:
         with self._lock:
             item.status = JobStatus.PROCESSING
 
-        # Create job if needed
+        # Create job if needed — freeze queue glossary into job config snapshot
         if not item.job_id:
             work = self.work_root / Path(item.source_path).stem / str(uuid4())[:8]
             job = create_translation_job(
@@ -212,10 +212,12 @@ class BatchQueue:
                 self.storage,
                 self.config,
                 work_dir=work,
+                glossary_entries=list(self.glossary) if self.glossary else None,
             )
             with self._lock:
                 item.job_id = job.job_id
         else:
+            # Resume: load job snapshot; do not re-inject current queue glossary
             job = self.storage.load_job(item.job_id)
 
         object.__setattr__(job, "_book_id", job.job_id)
@@ -227,7 +229,6 @@ class BatchQueue:
         engine = TranslationEngine(
             self.storage,
             job,
-            glossary_entries=self.glossary,
             on_progress=progress,
         )
         with self._lock:
