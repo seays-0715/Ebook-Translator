@@ -58,8 +58,11 @@ class App:
             settings_path or Path.home() / ".ebook_translator" / "settings.json"
         )
         self.settings = AppSettings.load(self.settings_path)
+        # Spec §42.5: manual override if set; else system UI language
         if self.settings.interface_language:
             i18n.set_language(self.settings.interface_language)
+        else:
+            i18n.set_language(i18n.detect_system_language())
 
         self.root = ctk.CTk()
         self.root.title(_t("app_title"))
@@ -349,7 +352,7 @@ class App:
 
         # Spec §41 progress: Book / Chapter / Chunk / Overall
         prog = ctk.CTkFrame(page)
-        prog.pack(fill="x", padx=4, pady=4)
+        prog.pack(fill="x", pady=4)
         self.lbl_book = ctk.CTkLabel(prog, text=_t("progress_book", book="-"), anchor="w")
         self.lbl_book.pack(fill="x")
         self.lbl_chapter = ctk.CTkLabel(
@@ -439,7 +442,6 @@ class App:
                             status=data.get("status"),
                         )
                     )
-                    # Best-effort chapter counters from job book
                     if self._queue and data.get("job_id"):
                         try:
                             job = self.storage.load_job(data["job_id"])
@@ -451,7 +453,6 @@ class App:
                                     book=job.book.metadata.title or job_id,
                                 )
                             )
-                            # Approximate chapter from completed ratio
                             cur_ch = min(
                                 nch,
                                 max(1, int(round(done / total * nch))) if nch else 0,
@@ -620,7 +621,7 @@ class App:
         ctk = _ctk()
         win = ctk.CTkToplevel(self.root)
         win.title(_t("settings"))
-        win.geometry("560x640")
+        win.geometry("560x720")
 
         scroll = ctk.CTkScrollableFrame(win)
         scroll.pack(fill="both", expand=True, padx=8, pady=8)
@@ -675,6 +676,17 @@ class App:
             "label_carry_over",
             str(self.settings.translation.carry_over_paragraphs),
         )
+        ctk.CTkLabel(scroll, text=_t("label_prompt"), anchor="w").pack(
+            anchor="w", pady=(8, 2)
+        )
+        prompt_box = ctk.CTkTextbox(scroll, height=120)
+        prompt_box.pack(fill="x", pady=2)
+        if self.settings.translation.prompt:
+            prompt_box.insert("1.0", self.settings.translation.prompt)
+        entries["prompt"] = prompt_box
+        ctk.CTkLabel(
+            scroll, text=_t("hint_prompt"), anchor="w"
+        ).pack(anchor="w", padx=4)
 
         section("settings_retry")
         field(
@@ -731,7 +743,10 @@ class App:
         )
 
         def _get(key: str) -> str:
-            return entries[key].get().strip()  # type: ignore[union-attr]
+            w = entries[key]
+            if hasattr(w, "get") and "Textbox" not in type(w).__name__:
+                return w.get().strip()  # type: ignore[union-attr]
+            return w.get("1.0", "end").strip()  # type: ignore[union-attr]
 
         def _get_float(key: str, default: float) -> float:
             try:
@@ -770,15 +785,19 @@ class App:
             self.settings.translation.carry_over_paragraphs = _get_int(
                 "carry_over_paragraphs", 2
             )
+            self.settings.translation.prompt = _get("prompt")
             self.settings.output.after_completion = _get("after_completion") or "nothing"
             lang = _get("interface_language")
             self.settings.interface_language = (
-                "" if lang in ("", "(auto)") else lang
+                "" if lang in ("", "(auto)", "auto") else lang
             )
             self.settings.max_image_edge = _get_int("max_image_edge", 1600)
             self.settings.save(self.settings_path)
             if self.settings.interface_language:
                 i18n.set_language(self.settings.interface_language)
+            else:
+                i18n.set_language(i18n.detect_system_language())
+            self.root.title(_t("app_title"))
             win.destroy()
 
         ctk.CTkButton(win, text=_t("save"), command=save).pack(pady=12)
