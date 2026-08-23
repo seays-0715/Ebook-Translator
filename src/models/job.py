@@ -30,7 +30,11 @@ class QueueStatus(str, Enum):
 
 
 class JobConfig(BaseModel):
-    """Snapshot of translation settings at job creation / first run."""
+    """Immutable snapshot of translation settings after first execution.
+
+    Includes glossary *entries* (not a live reference). Resume must use this
+    snapshot; callers must not silently replace it with current global glossary.
+    """
 
     source_language: str = "auto"
     target_language: str = "zh-TW"
@@ -38,6 +42,8 @@ class JobConfig(BaseModel):
     endpoint: str = "http://localhost:8000/v1"
     model_identifier: str = ""
     glossary_version: str | None = None
+    # Frozen prompt-list snapshot: [{source, target, type?, notes?}, ...]
+    glossary_entries: list[dict[str, str]] = Field(default_factory=list)
     prompt: str = ""
     style: str = "natural"
     chunk_target_tokens: int = 1000
@@ -58,12 +64,14 @@ class TranslationJob(BaseModel):
     status: JobStatus = JobStatus.PENDING
     config: JobConfig = Field(default_factory=JobConfig)
     book: CanonicalBook
+    # Paths under job storage root
     storage_dir: str = ""
     output_path: str | None = None
     created_at: str = ""
     updated_at: str = ""
     started_at: str | None = None
     finished_at: str | None = None
+    # Progress summary (detailed chunk state lives in SQLite)
     total_chunks: int = 0
     completed_chunks: int = 0
     failed_chunks: int = 0
