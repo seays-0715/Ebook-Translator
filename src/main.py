@@ -156,14 +156,10 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             model_identifier=args.model,
         )
-        work = args.work_dir / args.input.stem
-        job = create_translation_job(args.input, storage, config, work_dir=work)
-        print(f"Job created: {job.job_id}")
-
-        glossary = None
+        gloss_entries = None
+        gloss_ver = None
         if args.glossary:
             gstore = GlossaryStore(args.glossary.parent)
-            # allow path to file or id
             if args.glossary.suffix == ".json":
                 from src.glossary.models import Glossary
 
@@ -172,7 +168,19 @@ def main(argv: list[str] | None = None) -> int:
                 )
             else:
                 g = gstore.load(args.glossary.name)
-            glossary = g.as_prompt_list()
+            gloss_entries = g.as_prompt_list()
+            gloss_ver = g.version
+
+        work = args.work_dir / args.input.stem
+        job = create_translation_job(
+            args.input,
+            storage,
+            config,
+            work_dir=work,
+            glossary_entries=gloss_entries,
+            glossary_version=gloss_ver,
+        )
+        print(f"Job created: {job.job_id}")
 
         def progress(event, data):
             if event == "chunk_done":
@@ -181,8 +189,9 @@ def main(argv: list[str] | None = None) -> int:
                     f"{data['chunk_id']} -> {data['status']}"
                 )
 
+        # Resume/run uses Job snapshot only (no glossary override)
         status = run_translation_job(
-            storage, job.job_id, glossary=glossary, on_progress=progress
+            storage, job.job_id, on_progress=progress
         )
         print(f"Job finished: {status.value}")
         if status.value in ("completed", "completed_with_errors"):
