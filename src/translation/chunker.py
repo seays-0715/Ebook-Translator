@@ -64,7 +64,8 @@ def build_chunks(
                 {"id": bid, "text": current_texts[bid]}
                 for bid in current_ids[-tail_n:]
             ]
-            prev_tail_translated = []  # filled after translation
+            # Translations filled later by engine after previous chunk completes (§20.1)
+            prev_tail_translated = []
             current_ids = []
             current_texts = {}
             current_tokens = 0
