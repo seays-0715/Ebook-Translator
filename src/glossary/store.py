@@ -106,3 +106,37 @@ class GlossaryStore:
                 self.save(g)
                 return
         raise KeyError(entry_id)
+
+    def reject_entry(self, glossary_id: str, entry_id: str) -> None:
+        """Remove a candidate entry (reject)."""
+        g = self.load(glossary_id)
+        before = len(g.entries)
+        g.entries = [e for e in g.entries if e.id != entry_id]
+        if len(g.entries) == before:
+            raise KeyError(entry_id)
+        self.save(g)
+
+    def update_entry(
+        self,
+        glossary_id: str,
+        entry_id: str,
+        *,
+        source: str | None = None,
+        target: str | None = None,
+        notes: str | None = None,
+        confirmed: bool | None = None,
+    ) -> None:
+        g = self.load(glossary_id)
+        for e in g.entries:
+            if e.id == entry_id:
+                if source is not None:
+                    e.source = source
+                if target is not None:
+                    e.target = target
+                if notes is not None:
+                    e.notes = notes
+                if confirmed is not None:
+                    e.confirmed = confirmed
+                self.save(g)
+                return
+        raise KeyError(entry_id)
