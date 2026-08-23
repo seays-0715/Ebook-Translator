@@ -140,6 +140,9 @@ class TranslationEngine:
         return status
 
     def _process_one(self, chunk: Chunk) -> None:
+        # Resume-safe: fill carry-over translations from previous completed chunk
+        self._ensure_carry_over_translated(chunk)
+
         chunk.status = ChunkStatus.IN_PROGRESS
         chunk.attempt_count += 1
         self.storage.update_chunk(self.job.job_id, chunk)
@@ -157,7 +160,8 @@ class TranslationEngine:
             target_lang=self.job.config.target_language,
             style=self.job.config.style,
             glossary_entries=relevant_glossary,
-            carry_over=chunk.carry_over_source,
+            carry_over_source=chunk.carry_over_source,
+            carry_over_translated=chunk.carry_over_translated,
             to_translate=to_translate,
         )
 
@@ -180,6 +184,8 @@ class TranslationEngine:
             self._consecutive_conn_fails = 0
             # Update book snapshot texts
             self._apply_to_book(chunk)
+            # Spec §20.1: backfill next chunk's carry_over_translated
+            self._backfill_next_carry_over(chunk)
         except TranslationError as e:
             chunk.status = ChunkStatus.FAILED
             chunk.error_message = str(e)
@@ -205,6 +211,63 @@ class TranslationEngine:
                     "total": len(all_c),
                 },
             )
+
+    def _ensure_carry_over_translated(self, chunk: Chunk) -> None:
+        """If carry_over_source is set but translated is empty, fill from prior completed chunk."""
+        if not chunk.carry_over_source or chunk.carry_over_translated:
+            return
+        needed = {item["id"] for item in chunk.carry_over_source if item.get("id")}
+        if not needed:
+            return
+        for prev in self.storage.load_chunks(self.job.job_id):
+            if prev.status != ChunkStatus.COMPLETED:
+                continue
+            if prev.chapter_id != chunk.chapter_id:
+                continue
+            if not needed.issubset(set(prev.block_ids)):
+                continue
+            if not needed.issubset(set(prev.translated_texts.keys())):
+                continue
+            chunk.carry_over_translated = [
+                {"id": item["id"], "text": prev.translated_texts[item["id"]]}
+                for item in chunk.carry_over_source
+                if item.get("id") in prev.translated_texts
+            ]
+            self.storage.update_chunk(self.job.job_id, chunk)
+            return
+
+    def _backfill_next_carry_over(self, completed: Chunk) -> None:
+        """After a successful chunk, write its translations into the next chunk's carry-over."""
+        if not completed.translated_texts:
+            return
+        chunks = self.storage.load_chunks(self.job.job_id)
+        try:
+            idx = next(
+                i for i, c in enumerate(chunks) if c.chunk_id == completed.chunk_id
+            )
+        except StopIteration:
+            return
+        # Next chunk in same chapter that references this chunk's tail as carry-over
+        for nxt in chunks[idx + 1 :]:
+            if nxt.chapter_id != completed.chapter_id:
+                break
+            if not nxt.carry_over_source:
+                continue
+            needed = [
+                item["id"] for item in nxt.carry_over_source if item.get("id")
+            ]
+            if not needed:
+                continue
+            if not set(needed).issubset(set(completed.block_ids)):
+                continue
+            if not set(needed).issubset(set(completed.translated_texts.keys())):
+                continue
+            nxt.carry_over_translated = [
+                {"id": bid, "text": completed.translated_texts[bid]}
+                for bid in needed
+            ]
+            self.storage.update_chunk(self.job.job_id, nxt)
+            break
 
     def _apply_to_book(self, chunk: Chunk) -> None:
         """Write translated text back into the in-memory job.book snapshot."""
