@@ -25,7 +25,6 @@ from src.parsers.base import ParseResult
 from src.utils.images import resize_book_assets
 
 # ebooklib 0.17+ exposes ITEM_* on the top-level package, not ebooklib.epub.
-# Support both layouts for frozen EXE / pip version variance.
 def _item_type(name: str, default: int | None = None) -> int:
     for mod in (ebooklib, epub):
         val = getattr(mod, name, None)
@@ -40,31 +39,66 @@ _ITEM_DOCUMENT = _item_type("ITEM_DOCUMENT", 9)
 _ITEM_IMAGE = _item_type("ITEM_IMAGE", 1)
 _ITEM_COVER = _item_type("ITEM_COVER", 10)
 
-# Tags treated as block-level content
 _BLOCK_TAGS = {
-    "p",
-    "div",
-    "section",
-    "article",
-    "blockquote",
-    "li",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "figcaption",
-    "caption",
-    "td",
-    "th",
-    "dt",
-    "dd",
-    "pre",
+    "p", "div", "section", "article", "blockquote", "li",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "figcaption", "caption", "td", "th", "dt", "dd", "pre",
 }
-
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 _SKIP_TAGS = {"script", "style", "nav", "aside", "header", "footer", "iframe"}
+
+_TECH_NAME_RE = re.compile(
+    r"^(?:"
+    r"p\d+|"
+    r"item\d+|"
+    r"sec(?:tion)?\d+|"
+    r"chap(?:ter)?_?\d+|"
+    r"part\d+|"
+    r"page_?\d+|"
+    r"xhtml?\d+|"
+    r"text/?\d+|"
+    r"content\d+|"
+    r"doc(?:ument)?\d+|"
+    r"OEBPS.*|"
+    r"index_?\d*"
+    r")$",
+    re.IGNORECASE,
+)
+_CHAPTER_TITLE_RE = re.compile(
+    r"^("
+    r"第\s*[0-9零一二三四五六七八九十百千两兩〇]+\s*[章节節回卷部篇]"
+    r"|chapter\s+\d+"
+    r"|ch\.?\s*\d+"
+    r"|part\s+\d+"
+    r"|prologue|epilogue|前言|序章|序|後記|后记|跋|楔子|終章|终章"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_technical_filename(name: str) -> bool:
+    stem = Path(name).stem.strip()
+    if not stem:
+        return True
+    if _TECH_NAME_RE.match(stem):
+        return True
+    if re.fullmatch(r"[A-Za-z]?\d{2,6}", stem):
+        return True
+    return False
+
+
+def _title_from_blocks(blocks: list[ContentBlock]) -> str | None:
+    for b in blocks:
+        if b.type == BlockType.HEADING and (b.text or "").strip():
+            t = b.text.strip()
+            if not _is_technical_filename(t):
+                return t[:200]
+    for b in blocks[:5]:
+        if b.type == BlockType.PARAGRAPH and (b.text or "").strip():
+            t = b.text.strip()
+            if len(t) <= 80 and _CHAPTER_TITLE_RE.match(t):
+                return t[:200]
+    return None
 
 
 def parse_epub(path: str | Path, assets_dir: Path | None = None) -> ParseResult:
@@ -77,8 +111,7 @@ def parse_epub(path: str | Path, assets_dir: Path | None = None) -> ParseResult:
     assets = resize_book_assets(assets)
     spine_items = list(book.get_items_of_type(_ITEM_DOCUMENT))
 
-    # Build flat list of (suggested_title, blocks) from spine
-    raw_chapters: list[tuple[str, list[ContentBlock]]] = []
+    raw_chapters: list[tuple[str | None, list[ContentBlock]]] = []
     block_counter = 0
 
     for item in spine_items:
@@ -96,7 +129,6 @@ def parse_epub(path: str | Path, assets_dir: Path | None = None) -> ParseResult:
         if blocks:
             raw_chapters.append((title, blocks))
 
-    # Chapter detection: use headings or filename heuristics
     chapters = _assign_chapters(raw_chapters)
     suggestions = [
         {"id": ch.id, "title": ch.title, "order": ch.order, "block_count": len(ch.blocks)}
@@ -142,7 +174,6 @@ def _extract_images(
     assets: dict[str, str] = {}
     cover_ref: str | None = None
 
-    # Cover
     for item in book.get_items():
         itype = item.get_type()
         is_cover = itype == _ITEM_COVER or (
@@ -158,7 +189,6 @@ def _extract_images(
             cover_ref = key
             break
 
-    # Body images
     for item in book.get_items_of_type(_ITEM_IMAGE):
         name = item.get_name()
         key = f"img_{uuid4().hex[:8]}"
@@ -166,7 +196,7 @@ def _extract_images(
         rel = f"{key}{ext}"
         out = assets_dir / rel
         out.write_bytes(item.get_content())
-        assets[name] = str(out)  # map original href-ish name
+        assets[name] = str(out)
         assets[key] = str(out)
 
     return cover_ref, assets
@@ -189,7 +219,6 @@ def _walk(
     if name == "img":
         src = node.get("src") or node.get("data-src") or ""
         alt = node.get("alt") or ""
-        # Resolve against assets keys (best-effort by basename)
         ref = None
         base = Path(src).name
         for k, v in assets.items():
@@ -201,11 +230,8 @@ def _walk(
         bid = f"img{counter_start + len(blocks)}"
         blocks.append(
             ContentBlock(
-                id=bid,
-                type=BlockType.IMAGE,
-                order=len(blocks),
-                image_ref=ref,
-                image_alt=alt or None,
+                id=bid, type=BlockType.IMAGE, order=len(blocks),
+                image_ref=ref, image_alt=alt or None,
             )
         )
         return
@@ -217,11 +243,8 @@ def _walk(
             bid = f"h{counter_start + len(blocks)}"
             blocks.append(
                 ContentBlock(
-                    id=bid,
-                    type=BlockType.HEADING,
-                    order=len(blocks),
-                    text=text,
-                    level=level,
+                    id=bid, type=BlockType.HEADING, order=len(blocks),
+                    text=text, level=level,
                 )
             )
         return
@@ -232,16 +255,12 @@ def _walk(
             bid = f"cap{counter_start + len(blocks)}"
             blocks.append(
                 ContentBlock(
-                    id=bid,
-                    type=BlockType.CAPTION,
-                    order=len(blocks),
-                    text=text,
+                    id=bid, type=BlockType.CAPTION, order=len(blocks), text=text,
                 )
             )
         return
 
     if name in _BLOCK_TAGS:
-        # Prefer leaf text; if children contain img, recurse
         has_img = node.find("img") is not None
         if has_img:
             for child in node.children:
@@ -252,48 +271,47 @@ def _walk(
             bid = f"p{counter_start + len(blocks)}"
             blocks.append(
                 ContentBlock(
-                    id=bid,
-                    type=BlockType.PARAGRAPH,
-                    order=len(blocks),
-                    text=text,
+                    id=bid, type=BlockType.PARAGRAPH, order=len(blocks), text=text,
                 )
             )
         return
 
-    # Generic container — recurse
     for child in node.children:
         _walk(child, blocks, assets, counter_start)
 
 
-def _guess_title(soup: BeautifulSoup, fallback: str) -> str:
-    for tag in ("h1", "h2", "title"):
+def _guess_title(soup: BeautifulSoup, fallback: str) -> str | None:
+    """Structural title from HTML. Never returns technical filenames."""
+    for tag in ("h1", "h2", "h3", "title"):
         el = soup.find(tag)
         if el:
             t = el.get_text(" ", strip=True)
-            if t:
+            if t and not _is_technical_filename(t):
+                if _is_technical_filename(fallback) and t.lower() == Path(fallback).stem.lower():
+                    continue
                 return t[:200]
-    return Path(fallback).stem
+    if fallback and not _is_technical_filename(fallback):
+        stem = Path(fallback).stem.strip()
+        if stem and not _is_technical_filename(stem):
+            return stem[:200]
+    return None
 
 
 def _assign_chapters(
-    raw: list[tuple[str, list[ContentBlock]]],
+    raw: list[tuple[str | None, list[ContentBlock]]],
 ) -> list[Chapter]:
-    """Initial grouping: each spine document → candidate Chapter.
-
-    This is only a starting point for Preview. Final structure is
-    Chapter → ordered Blocks[] after user Merge/Split/Rename/Remove.
-    Spine is not the permanent semantic source of truth.
-    """
+    """Initial grouping: spine preserves reading order; titles from structure."""
     chapters: list[Chapter] = []
     for i, (title, blocks) in enumerate(raw):
-        # Re-number order within chapter
-        fixed = [
-            b.model_copy(update={"order": j}) for j, b in enumerate(blocks)
-        ]
+        fixed = [b.model_copy(update={"order": j}) for j, b in enumerate(blocks)]
+        from_blocks = _title_from_blocks(fixed)
+        final_title = from_blocks or title
+        if not final_title or _is_technical_filename(final_title):
+            final_title = f"Chapter {i + 1}"
         chapters.append(
             Chapter(
                 id=f"ch{i + 1}",
-                title=title or f"Chapter {i + 1}",
+                title=final_title,
                 order=i,
                 blocks=fixed,
             )
