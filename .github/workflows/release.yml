@@ -52,11 +52,64 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          pyinstaller --noconfirm --clean --onefile --windowed --name EbookTranslator src/main.py
+          # Include i18n JSON locale tables inside the onefile bundle.
+          # Windows --add-data uses semicolon: SRC;DEST_INSIDE_BUNDLE
+          pyinstaller `
+            --noconfirm `
+            --clean `
+            --onefile `
+            --windowed `
+            --name EbookTranslator `
+            --paths . `
+            --add-data "src/i18n/en.json;src/i18n" `
+            --add-data "src/i18n/zh-HK.json;src/i18n" `
+            --hidden-import customtkinter `
+            --hidden-import ebooklib `
+            --hidden-import bs4 `
+            --hidden-import lxml `
+            --hidden-import PIL `
+            --hidden-import openai `
+            --collect-all customtkinter `
+            src/main.py
           if (-not (Test-Path "dist/EbookTranslator.exe")) {
             throw "EXE build failed: dist/EbookTranslator.exe does not exist"
           }
           Get-Item "dist/EbookTranslator.exe" | Format-List Name, Length, FullName
+
+      - name: Verify locale resources inside EXE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $script = @'
+          from PyInstaller.archive.readers import CArchiveReader
+          r = CArchiveReader(r"dist/EbookTranslator.exe")
+          names = []
+          toc = getattr(r, "toc", None) or getattr(r, "tocs", None)
+          if isinstance(toc, dict):
+              names = list(toc.keys())
+          elif toc is not None:
+              for entry in toc:
+                  if isinstance(entry, (list, tuple)) and entry:
+                      names.append(str(entry[0]))
+                  else:
+                      names.append(str(entry))
+          print("--- archive entries containing i18n/json ---")
+          hits = [n for n in names if "i18n" in n.replace("\\", "/").lower() or n.lower().endswith(".json")]
+          for h in hits:
+              print(h)
+          need = ["zh-HK.json", "en.json"]
+          missing = [n for n in need if not any(n in x.replace("\\", "/") for x in names)]
+          if missing:
+              raise SystemExit(f"Missing locale resources in EXE: {missing}")
+          print("OK: en.json and zh-HK.json present in onefile archive")
+          '@
+          python -c $script
+
+      - name: Verify i18n zh-HK without display
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -c "from src import i18n; i18n.set_language('zh-HK'); t=i18n.get('app_title'); assert t=='電子書翻譯工具', t; print('source zh-HK OK:', t)"
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
@@ -86,7 +139,6 @@ jobs:
           $tag = "v${{ steps.version.outputs.version }}"
           Write-Host "Release tag: $tag"
 
-          # Does a Release object already exist?
           gh release view $tag 2>$null | Out-Null
           $releaseExists = ($LASTEXITCODE -eq 0)
 
@@ -98,13 +150,11 @@ jobs:
             }
           } else {
             Write-Host "Creating release $tag"
-            # Tag may already exist without a Release; prefer --existing-tag fallback
             gh release create $tag dist/EbookTranslator.exe --title "Ebook Translator $tag" --generate-notes
             if ($LASTEXITCODE -ne 0) {
               Write-Host "create failed — retry with --existing-tag"
               gh release create $tag dist/EbookTranslator.exe --title "Ebook Translator $tag" --generate-notes --existing-tag
               if ($LASTEXITCODE -ne 0) {
-                # Last resort: release may have been created by a concurrent run
                 gh release view $tag 2>$null | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                   gh release upload $tag dist/EbookTranslator.exe --clobber
