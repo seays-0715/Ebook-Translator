@@ -52,8 +52,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          # Include i18n JSON locale tables inside the onefile bundle.
-          # Windows --add-data uses semicolon: SRC;DEST_INSIDE_BUNDLE
           pyinstaller `
             --noconfirm `
             --clean `
@@ -63,6 +61,7 @@ jobs:
             --paths . `
             --add-data "src/i18n/en.json;src/i18n" `
             --add-data "src/i18n/zh-HK.json;src/i18n" `
+            --add-data "src/i18n/zh-TW.json;src/i18n" `
             --hidden-import customtkinter `
             --hidden-import ebooklib `
             --hidden-import bs4 `
@@ -97,11 +96,11 @@ jobs:
           hits = [n for n in names if "i18n" in n.replace("\\", "/").lower() or n.lower().endswith(".json")]
           for h in hits:
               print(h)
-          need = ["zh-HK.json", "en.json"]
+          need = ["zh-HK.json", "zh-TW.json", "en.json"]
           missing = [n for n in need if not any(n in x.replace("\\", "/") for x in names)]
           if missing:
               raise SystemExit(f"Missing locale resources in EXE: {missing}")
-          print("OK: en.json and zh-HK.json present in onefile archive")
+          print("OK: locale JSON present in onefile archive")
           '@
           python -c $script
 
@@ -111,8 +110,6 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: |
           $ErrorActionPreference = "Stop"
-          # Avoid printing CJK to the Windows cp1252 console (UnicodeEncodeError).
-          # Assert with unicode escapes only; print ASCII status.
           python -c "from src import i18n; i18n.set_language('zh-HK'); t=i18n.get('app_title'); expected='\u96fb\u5b50\u66f8\u7ffb\u8b6f\u5de5\u5177'; assert t==expected, repr(t); print('source zh-HK OK')"
 
       - name: Upload Actions artifact
@@ -142,34 +139,24 @@ jobs:
           $ErrorActionPreference = "Stop"
           $tag = "v${{ steps.version.outputs.version }}"
           Write-Host "Release tag: $tag"
-
           gh release view $tag 2>$null | Out-Null
           $releaseExists = ($LASTEXITCODE -eq 0)
-
           if ($releaseExists) {
             Write-Host "Release $tag exists — uploading asset with --clobber"
             gh release upload $tag dist/EbookTranslator.exe --clobber
-            if ($LASTEXITCODE -ne 0) {
-              throw "gh release upload failed for $tag (exit $LASTEXITCODE)"
-            }
+            if ($LASTEXITCODE -ne 0) { throw "gh release upload failed for $tag" }
           } else {
             Write-Host "Creating release $tag"
             gh release create $tag dist/EbookTranslator.exe --title "Ebook Translator $tag" --generate-notes
             if ($LASTEXITCODE -ne 0) {
-              Write-Host "create failed — retry with --existing-tag"
               gh release create $tag dist/EbookTranslator.exe --title "Ebook Translator $tag" --generate-notes --existing-tag
               if ($LASTEXITCODE -ne 0) {
                 gh release view $tag 2>$null | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                   gh release upload $tag dist/EbookTranslator.exe --clobber
-                  if ($LASTEXITCODE -ne 0) {
-                    throw "gh release upload failed for $tag after concurrent create"
-                  }
-                } else {
-                  throw "gh release create failed for $tag"
-                }
+                  if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }
+                } else { throw "gh release create failed for $tag" }
               }
             }
           }
-
           Write-Host "Release $tag updated successfully"
