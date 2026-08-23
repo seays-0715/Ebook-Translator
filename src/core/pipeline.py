@@ -50,7 +50,14 @@ def create_translation_job(
     config: JobConfig,
     *,
     work_dir: Path,
+    glossary_entries: list[dict[str, str]] | None = None,
+    glossary_version: str | None = None,
 ) -> TranslationJob:
+    """Create job with full immutable config + book snapshot.
+
+    Original input is only read (parser → assets under work_dir).
+    Optional glossary_entries are frozen into config at creation time.
+    """
     source = Path(source)
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -59,8 +66,19 @@ def create_translation_job(
 
     result = parse_to_book(source, assets_dir=assets_dir)
 
+    # Freeze glossary into config snapshot (copy; do not keep live reference)
+    if glossary_entries is not None:
+        config = config.model_copy(
+            update={
+                "glossary_entries": [dict(e) for e in glossary_entries],
+                "glossary_version": glossary_version or config.glossary_version,
+            }
+        )
+    elif glossary_version is not None:
+        config = config.model_copy(update={"glossary_version": glossary_version})
+
     job_id = str(uuid4())
-    book_id = job_id  # 1:1 snapshot
+    book_id = job_id  # 1:1 book snapshot owned by this job
     storage.save_book(result.book, book_id=book_id)
     now = datetime.now(timezone.utc).isoformat()
     job = TranslationJob(
@@ -81,14 +99,16 @@ def run_translation_job(
     storage: Storage,
     job_id: str,
     *,
-    glossary: list[dict[str, str]] | None = None,
     on_progress=None,
 ) -> JobStatus:
+    """Run / resume using only the Job's frozen config (incl. glossary snapshot).
+
+    Callers must not inject a different glossary here. To use a new glossary,
+    create a new Job.
+    """
     job = storage.load_job(job_id)
     object.__setattr__(job, "_book_id", job_id)
-    engine = TranslationEngine(
-        storage, job, glossary_entries=glossary, on_progress=on_progress
-    )
+    engine = TranslationEngine(storage, job, on_progress=on_progress)
     return engine.run()
 
 
