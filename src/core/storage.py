@@ -82,7 +82,6 @@ class Storage:
                         f"current is {SCHEMA_VERSION}. Recreate the database."
                     )
 
-    # ------------------------------------------------------------------ Book
     def save_book(self, book: CanonicalBook, book_id: str | None = None) -> str:
         book_id = book_id or str(uuid4())
         now = _utcnow()
@@ -91,7 +90,6 @@ class Storage:
             conn.execute("DELETE FROM blocks WHERE book_id = ?", (book_id,))
             conn.execute("DELETE FROM chapters WHERE book_id = ?", (book_id,))
             conn.execute("DELETE FROM books WHERE book_id = ?", (book_id,))
-
             conn.execute(
                 """
                 INSERT INTO books
@@ -100,21 +98,13 @@ class Storage:
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    book_id,
-                    book.schema_version,
-                    book.metadata.model_dump_json(),
-                    book.cover_ref,
-                    book.layout.value,
-                    now,
-                    now,
+                    book_id, book.schema_version, book.metadata.model_dump_json(),
+                    book.cover_ref, book.layout.value, now, now,
                 ),
             )
             for ch in book.chapters:
                 conn.execute(
-                    """
-                    INSERT INTO chapters (book_id, chapter_id, title, ord)
-                    VALUES (?, ?, ?, ?)
-                    """,
+                    "INSERT INTO chapters (book_id, chapter_id, title, ord) VALUES (?, ?, ?, ?)",
                     (book_id, ch.id, ch.title, ch.order),
                 )
                 for b in ch.blocks:
@@ -126,15 +116,8 @@ class Storage:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
-                            book_id,
-                            ch.id,
-                            b.id,
-                            b.type.value,
-                            b.order,
-                            b.text,
-                            b.image_ref,
-                            b.image_alt,
-                            b.level,
+                            book_id, ch.id, b.id, b.type.value, b.order, b.text,
+                            b.image_ref, b.image_alt, b.level,
                             _json_dumps(b.attrs) if b.attrs else None,
                         ),
                     )
@@ -147,68 +130,40 @@ class Storage:
 
     def load_book(self, book_id: str) -> CanonicalBook:
         with self._tx() as conn:
-            row = conn.execute(
-                "SELECT * FROM books WHERE book_id = ?", (book_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM books WHERE book_id = ?", (book_id,)).fetchone()
             if row is None:
                 raise KeyError(f"Book not found: {book_id}")
             if int(row["schema_version"]) != SCHEMA_VERSION:
-                raise RuntimeError(
-                    f"Unsupported book schema version {row['schema_version']}"
-                )
-
+                raise RuntimeError(f"Unsupported book schema version {row['schema_version']}")
             meta = BookMetadata.model_validate_json(row["metadata_json"])
             chapters_rows = conn.execute(
-                "SELECT * FROM chapters WHERE book_id = ? ORDER BY ord",
-                (book_id,),
+                "SELECT * FROM chapters WHERE book_id = ? ORDER BY ord", (book_id,)
             ).fetchall()
             chapters: list[Chapter] = []
             for cr in chapters_rows:
                 blocks_rows = conn.execute(
-                    """
-                    SELECT * FROM blocks
-                    WHERE book_id = ? AND chapter_id = ?
-                    ORDER BY ord
-                    """,
+                    "SELECT * FROM blocks WHERE book_id = ? AND chapter_id = ? ORDER BY ord",
                     (book_id, cr["chapter_id"]),
                 ).fetchall()
                 blocks = [
                     ContentBlock(
-                        id=br["block_id"],
-                        type=BlockType(br["type"]),
-                        order=br["ord"],
-                        text=br["text"],
-                        image_ref=br["image_ref"],
-                        image_alt=br["image_alt"],
-                        level=br["level"],
-                        attrs=_json_loads(br["attrs_json"]) or {},
+                        id=br["block_id"], type=BlockType(br["type"]), order=br["ord"],
+                        text=br["text"], image_ref=br["image_ref"], image_alt=br["image_alt"],
+                        level=br["level"], attrs=_json_loads(br["attrs_json"]) or {},
                     )
                     for br in blocks_rows
                 ]
-                chapters.append(
-                    Chapter(
-                        id=cr["chapter_id"],
-                        title=cr["title"],
-                        order=cr["ord"],
-                        blocks=blocks,
-                    )
-                )
+                chapters.append(Chapter(id=cr["chapter_id"], title=cr["title"], order=cr["ord"], blocks=blocks))
             asset_rows = conn.execute(
-                "SELECT asset_key, rel_path FROM assets WHERE book_id = ?",
-                (book_id,),
+                "SELECT asset_key, rel_path FROM assets WHERE book_id = ?", (book_id,)
             ).fetchall()
             assets = {r["asset_key"]: r["rel_path"] for r in asset_rows}
-
             return CanonicalBook(
-                schema_version=int(row["schema_version"]),
-                metadata=meta,
-                cover_ref=row["cover_ref"],
-                layout=Layout(row["layout"]),
-                chapters=chapters,
-                assets=assets,
+                schema_version=int(row["schema_version"]), metadata=meta,
+                cover_ref=row["cover_ref"], layout=Layout(row["layout"]),
+                chapters=chapters, assets=assets,
             )
 
-    # ------------------------------------------------------------------ Job
     def save_job(self, job: TranslationJob) -> None:
         now = _utcnow()
         with self._tx() as conn:
@@ -233,54 +188,33 @@ class Storage:
                     error_summary = excluded.error_summary
                 """,
                 (
-                    job.job_id,
-                    job.schema_version,
-                    job.status.value,
-                    job.config.model_dump_json(),
-                    # book_id is stored separately; book snapshot is already saved
-                    getattr(job, "_book_id", job.job_id),
-                    job.storage_dir,
-                    job.output_path,
-                    job.created_at or now,
-                    now,
-                    job.started_at,
-                    job.finished_at,
-                    job.total_chunks,
-                    job.completed_chunks,
-                    job.failed_chunks,
-                    job.error_summary,
+                    job.job_id, job.schema_version, job.status.value,
+                    job.config.model_dump_json(), getattr(job, "_book_id", job.job_id),
+                    job.storage_dir, job.output_path, job.created_at or now, now,
+                    job.started_at, job.finished_at, job.total_chunks,
+                    job.completed_chunks, job.failed_chunks, job.error_summary,
                 ),
             )
 
     def load_job(self, job_id: str) -> TranslationJob:
         with self._tx() as conn:
-            row = conn.execute(
-                "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
             if row is None:
                 raise KeyError(f"Job not found: {job_id}")
             if int(row["schema_version"]) != SCHEMA_VERSION:
                 raise RuntimeError(
-                    f"Unsupported job schema version {row['schema_version']}. "
-                    "Recreate the job."
+                    f"Unsupported job schema version {row['schema_version']}. Recreate the job."
                 )
             book = self.load_book(row["book_id"])
             return TranslationJob(
-                job_id=row["job_id"],
-                schema_version=int(row["schema_version"]),
+                job_id=row["job_id"], schema_version=int(row["schema_version"]),
                 status=JobStatus(row["status"]),
                 config=JobConfig.model_validate_json(row["config_json"]),
-                book=book,
-                storage_dir=row["storage_dir"],
-                output_path=row["output_path"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                started_at=row["started_at"],
-                finished_at=row["finished_at"],
-                total_chunks=row["total_chunks"],
-                completed_chunks=row["completed_chunks"],
-                failed_chunks=row["failed_chunks"],
-                error_summary=row["error_summary"],
+                book=book, storage_dir=row["storage_dir"], output_path=row["output_path"],
+                created_at=row["created_at"], updated_at=row["updated_at"],
+                started_at=row["started_at"], finished_at=row["finished_at"],
+                total_chunks=row["total_chunks"], completed_chunks=row["completed_chunks"],
+                failed_chunks=row["failed_chunks"], error_summary=row["error_summary"],
             )
 
     def list_jobs(self) -> list[dict[str, Any]]:
@@ -295,13 +229,16 @@ class Storage:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def delete_job(self, job_id: str) -> None:
+        """Permanently remove job row, chunks, and book snapshot."""
+        with self._tx() as conn:
+            conn.execute("DELETE FROM chunks WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM books WHERE book_id = ?", (job_id,))
+
     def update_job_status(
-        self,
-        job_id: str,
-        status: JobStatus,
-        *,
-        error_summary: str | None = None,
-        finished: bool = False,
+        self, job_id: str, status: JobStatus, *,
+        error_summary: str | None = None, finished: bool = False,
     ) -> None:
         now = _utcnow()
         with self._tx() as conn:
@@ -333,8 +270,7 @@ class Storage:
                 conn.execute(
                     """
                     UPDATE jobs SET completed_chunks = ?, failed_chunks = ?,
-                           total_chunks = ?, updated_at = ?
-                    WHERE job_id = ?
+                           total_chunks = ?, updated_at = ? WHERE job_id = ?
                     """,
                     (completed, failed, total, now, job_id),
                 )
@@ -342,13 +278,11 @@ class Storage:
                 conn.execute(
                     """
                     UPDATE jobs SET completed_chunks = ?, failed_chunks = ?,
-                           updated_at = ?
-                    WHERE job_id = ?
+                           updated_at = ? WHERE job_id = ?
                     """,
                     (completed, failed, now, job_id),
                 )
 
-    # ------------------------------------------------------------------ Chunks
     def save_chunks(self, job_id: str, chunks: Iterable[Chunk]) -> None:
         now = _utcnow()
         with self._tx() as conn:
@@ -371,51 +305,32 @@ class Storage:
                         carry_over_translated_json = excluded.carry_over_translated_json
                     """,
                     (
-                        job_id,
-                        c.chunk_id,
-                        c.chapter_id,
-                        _json_dumps(c.block_ids),
-                        _json_dumps(c.carry_over_source),
-                        _json_dumps(c.carry_over_translated),
-                        _json_dumps(c.source_texts),
-                        _json_dumps(c.translated_texts),
-                        c.status.value,
-                        c.error_message,
-                        c.attempt_count,
-                        c.token_estimate,
-                        c.created_at or now,
-                        now,
+                        job_id, c.chunk_id, c.chapter_id, _json_dumps(c.block_ids),
+                        _json_dumps(c.carry_over_source), _json_dumps(c.carry_over_translated),
+                        _json_dumps(c.source_texts), _json_dumps(c.translated_texts),
+                        c.status.value, c.error_message, c.attempt_count, c.token_estimate,
+                        c.created_at or now, now,
                     ),
                 )
 
     def load_chunks(self, job_id: str) -> list[Chunk]:
-        # rowid = insertion order from build_chunks (reading order).
-        # Do not ORDER BY chunk_id (random suffix breaks carry-over).
         with self._tx() as conn:
             rows = conn.execute(
-                "SELECT * FROM chunks WHERE job_id = ? ORDER BY rowid",
-                (job_id,),
+                "SELECT * FROM chunks WHERE job_id = ? ORDER BY rowid", (job_id,)
             ).fetchall()
             result: list[Chunk] = []
             for r in rows:
                 result.append(
                     Chunk(
-                        chunk_id=r["chunk_id"],
-                        chapter_id=r["chapter_id"],
+                        chunk_id=r["chunk_id"], chapter_id=r["chapter_id"],
                         block_ids=_json_loads(r["block_ids_json"]) or [],
                         carry_over_source=_json_loads(r["carry_over_source_json"]) or [],
-                        carry_over_translated=_json_loads(
-                            r["carry_over_translated_json"]
-                        )
-                        or [],
+                        carry_over_translated=_json_loads(r["carry_over_translated_json"]) or [],
                         source_texts=_json_loads(r["source_texts_json"]) or {},
                         translated_texts=_json_loads(r["translated_texts_json"]) or {},
-                        status=ChunkStatus(r["status"]),
-                        error_message=r["error_message"],
-                        attempt_count=r["attempt_count"],
-                        token_estimate=r["token_estimate"],
-                        created_at=r["created_at"],
-                        updated_at=r["updated_at"],
+                        status=ChunkStatus(r["status"]), error_message=r["error_message"],
+                        attempt_count=r["attempt_count"], token_estimate=r["token_estimate"],
+                        created_at=r["created_at"], updated_at=r["updated_at"],
                     )
                 )
             return result
