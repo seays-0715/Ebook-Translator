@@ -2,6 +2,10 @@
 
 Strips publisher CSS / decoration. Keeps reading-order Content Blocks
 (paragraph, image, caption, heading, footnote). Cover and body images retained.
+
+Spine items are initial chapter candidates only — not permanent semantic source
+of truth. Chapter Detection / Preview / User Correction is authoritative.
+Original EPUB TOC/NCX/Nav is never used as Canonical Book structure.
 """
 
 from __future__ import annotations
@@ -256,9 +260,11 @@ def _guess_title(soup: BeautifulSoup, fallback: str) -> str:
 def _assign_chapters(
     raw: list[tuple[str, list[ContentBlock]]],
 ) -> list[Chapter]:
-    """Simple pass: each spine document becomes a chapter.
+    """Initial grouping: each spine document → candidate Chapter.
 
-    Further merge/split is done in Preview UI by the user.
+    This is only a starting point for Preview. Final structure is
+    Chapter → ordered Blocks[] after user Merge/Split/Rename/Remove.
+    Spine is not the permanent semantic source of truth.
     """
     chapters: list[Chapter] = []
     for i, (title, blocks) in enumerate(raw):
