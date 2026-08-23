@@ -72,7 +72,9 @@ def create_translation_job(
     if book is not None:
         if not isinstance(book, CanonicalBook):
             raise TypeError("book must be a CanonicalBook")
+        # Deep-copy snapshot so later Preview edits cannot mutate this Job
         snapshot = CanonicalBook.model_validate(book.model_dump())
+        # Copy referenced asset files into job work dir when paths are external
         new_assets: dict[str, str] = {}
         for key, rel in (snapshot.assets or {}).items():
             src_path = Path(rel)
@@ -91,6 +93,7 @@ def create_translation_job(
         result = parse_to_book(source, assets_dir=assets_dir)
         snapshot = result.book
 
+    # Freeze glossary into config snapshot (copy; do not keep live reference)
     if glossary_entries is not None:
         config = config.model_copy(
             update={
@@ -102,7 +105,7 @@ def create_translation_job(
         config = config.model_copy(update={"glossary_version": glossary_version})
 
     job_id = str(uuid4())
-    book_id = job_id
+    book_id = job_id  # 1:1 book snapshot owned by this job
     storage.save_book(snapshot, book_id=book_id)
     now = datetime.now(timezone.utc).isoformat()
     job = TranslationJob(

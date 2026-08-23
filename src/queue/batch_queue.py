@@ -3,6 +3,9 @@
 Queue status and Job status are independent:
   Queue: Running | Paused | Stopped
   Job:   Pending | Processing | Paused | Completed | Completed with Errors | Cancelled
+
+Only one book processes at a time. On job completion (or Completed with Errors),
+auto-start next. Endpoint-level failure pauses the whole Queue.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
@@ -31,7 +35,9 @@ class QueueItem:
     job_id: str | None = None
     status: JobStatus = JobStatus.PENDING
     error: str | None = None
-    priority: int = 0
+    priority: int = 0  # lower = higher priority; insertion order as tiebreak
+    # Optional pre-normalized Canonical Book (Preview corrections). When set,
+    # Job creation uses this snapshot and does not re-parse source_path.
     book: object | None = None
     display_name: str = ""
 
@@ -54,6 +60,8 @@ class BatchQueue:
         self._current_engine: TranslationEngine | None = None
         self._stop_flag = False
         self._pause_flag = False
+
+    # ------------------------------------------------------------------ public
 
     @property
     def status(self) -> QueueStatus:
@@ -95,6 +103,10 @@ class BatchQueue:
             return item
 
     def remove(self, item_id: str, *, delete_job_data: bool = False) -> None:
+        """Remove item from queue. Processing items must be cancelled first.
+        delete_job_data=True permanently deletes job checkpoints from storage.
+        Default keeps checkpoints on disk (user may re-queue later).
+        """
         with self._lock:
             item = self._find(item_id)
             if item.status == JobStatus.PROCESSING:
@@ -108,13 +120,18 @@ class BatchQueue:
                 logger.exception("Failed to delete job data for %s", job_id)
 
     def cancel_job(self, item_id: str) -> None:
+        """Cancel a job: stop new requests; completed checkpoints remain."""
         with self._lock:
             item = self._find(item_id)
             eng = self._current_engine
             current_job = eng.job.job_id if eng else None
             if item.job_id and item.job_id == current_job and eng:
                 eng.request_stop()
-            if item.status in (JobStatus.PENDING, JobStatus.PROCESSING, JobStatus.PAUSED):
+            if item.status in (
+                JobStatus.PENDING,
+                JobStatus.PROCESSING,
+                JobStatus.PAUSED,
+            ):
                 item.status = JobStatus.CANCELLED
             if item.job_id:
                 try:
@@ -123,6 +140,7 @@ class BatchQueue:
                     logger.exception("status update failed for cancel %s", item.job_id)
 
     def resume_job(self, item_id: str) -> None:
+        """Resume a single paused/cancelled-pending job back to PENDING."""
         with self._lock:
             item = self._find(item_id)
             if item.status in (JobStatus.PAUSED, JobStatus.CANCELLED):
@@ -154,6 +172,7 @@ class BatchQueue:
             self._worker.start()
 
     def pause(self) -> None:
+        """Pause entire queue. Current job finishes its in-flight request then pauses."""
         with self._lock:
             self._pause_flag = True
             self._status = QueueStatus.PAUSED
@@ -181,6 +200,7 @@ class BatchQueue:
             eng.request_stop()
 
     def pause_job(self, item_id: str) -> None:
+        """Pause a single job; queue stays Running so other jobs can proceed later."""
         with self._lock:
             item = self._find(item_id)
             eng = self._current_engine
@@ -189,6 +209,8 @@ class BatchQueue:
                 eng.request_pause()
             elif item.status in (JobStatus.PENDING, JobStatus.PROCESSING):
                 item.status = JobStatus.PAUSED
+
+    # ------------------------------------------------------------------ internal
 
     def _find(self, item_id: str) -> QueueItem:
         for i in self._items:
@@ -201,7 +223,13 @@ class BatchQueue:
 
     def _next_pending(self) -> QueueItem | None:
         for i in self._items:
-            if i.status == JobStatus.PENDING:
+            if i.status in (JobStatus.PENDING, JobStatus.PAUSED):
+                # Skip user-paused individual jobs when only resuming queue?
+                # Spec: if user pauses single job, queue still running, others continue.
+                if i.status == JobStatus.PAUSED:
+                    # Only pick up if we don't treat PAUSED as "user held"
+                    # For simplicity: PENDING only for auto-advance; PAUSED needs explicit resume
+                    continue
                 return i
         return None
 
@@ -226,12 +254,15 @@ class BatchQueue:
                     item.status = JobStatus.COMPLETED_WITH_ERRORS
                     item.error = str(e)
                 self._emit("item_error", {"item_id": item.item_id, "error": str(e)})
+                # Continue to next book (spec: do not block queue)
                 continue
 
     def _process_item(self, item: QueueItem) -> None:
         with self._lock:
             item.status = JobStatus.PROCESSING
 
+        # Create job if needed — freeze queue glossary into job config snapshot.
+        # Prefer normalized book from Preview; do not re-parse source in that case.
         if not item.job_id:
             stem = Path(item.source_path).stem if item.source_path else "book"
             work = self.work_root / stem / str(uuid4())[:8]
@@ -245,8 +276,10 @@ class BatchQueue:
             )
             with self._lock:
                 item.job_id = job.job_id
+                # Drop live book reference after snapshot is frozen into Job
                 item.book = None
         else:
+            # Resume: load job snapshot; do not re-inject current queue glossary
             job = self.storage.load_job(item.job_id)
 
         object.__setattr__(job, "_book_id", job.job_id)
@@ -255,7 +288,11 @@ class BatchQueue:
             data = {**data, "item_id": item.item_id, "job_id": item.job_id}
             self._emit(event, data)
 
-        engine = TranslationEngine(self.storage, job, on_progress=progress)
+        engine = TranslationEngine(
+            self.storage,
+            job,
+            on_progress=progress,
+        )
         with self._lock:
             self._current_engine = engine
 
@@ -266,6 +303,10 @@ class BatchQueue:
                 if status == JobStatus.PAUSED:
                     self._pause_flag = True
                     self._status = QueueStatus.PAUSED
+                    # Endpoint failure message already on job
+                    if job.error_summary and "Local AI" in (job.error_summary or ""):
+                        # Spec §29.1: pause whole queue
+                        pass
 
             if status in (JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS):
                 try:
