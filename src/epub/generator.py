@@ -34,7 +34,6 @@ def generate_epub(
     if book.metadata.author:
         eb.add_author(book.metadata.author)
 
-    # Cover
     if book.cover_ref and book.assets.get(book.cover_ref):
         cover_path = Path(book.assets[book.cover_ref])
         if cover_path.exists():
@@ -54,7 +53,6 @@ def generate_epub(
     toc = []
     image_items: dict[str, epub.EpubItem] = {}
 
-    # Register images
     for key, rel in book.assets.items():
         p = Path(rel)
         if not p.exists():
@@ -81,8 +79,6 @@ def generate_epub(
             file_name=file_name,
             lang=book.metadata.language or "en",
         )
-        # ebooklib expects content as the inner body or full document;
-        # set as HTML fragment with proper structure
         chapter.set_content(
             f"<html xmlns=\"http://www.w3.org/1999/xhtml\">"
             f"<head><title>{escape(ch.title or '')}</title>"
@@ -95,7 +91,6 @@ def generate_epub(
         toc.append(chapter)
 
     if not spine_items:
-        # Empty book guard
         empty = epub.EpubHtml(title="Empty", file_name="empty.xhtml", lang="en")
         empty.set_content(
             '<html xmlns="http://www.w3.org/1999/xhtml"><body><p></p></body></html>'
@@ -109,7 +104,6 @@ def generate_epub(
     eb.add_item(epub.EpubNav())
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic write: generate to .tmp, require non-empty, then rename
     epub.write_epub(str(tmp_path), eb, {})
     if not tmp_path.is_file() or tmp_path.stat().st_size == 0:
         if tmp_path.exists():
@@ -121,6 +115,7 @@ def generate_epub(
 
 def _chapter_html(chapter, image_items: dict) -> str:
     parts: list[str] = []
+    parts.append('<div class="chapter">')
     parts.append(f"<h1>{escape(chapter.title or '')}</h1>")
     for b in chapter.blocks:
         if b.type == BlockType.HEADING:
@@ -138,49 +133,83 @@ def _chapter_html(chapter, image_items: dict) -> str:
                 src = image_items[b.image_ref].file_name
             elif b.image_ref:
                 from pathlib import Path as P
-
                 base = P(b.image_ref).name
                 if base in image_items:
                     src = image_items[base].file_name
             if src:
                 alt = escape(b.image_alt or "")
                 parts.append(f'<img src="{src}" alt="{alt}"/>')
+    parts.append("</div>")
     return "\n".join(parts)
 
 
 def _css(layout: Layout) -> str:
+    """Simple consistent default typography for V1 clean EPUB."""
     direction = "vertical-rl" if layout == Layout.VERTICAL else "horizontal-tb"
     return f"""
+@namespace epub "http://www.idpf.org/2007/ops";
+html {{ font-size: 100%; }}
 body {{
-  font-family: serif;
-  line-height: 1.6;
-  margin: 1em;
+  font-family: "Georgia", "Times New Roman", "Songti SC", "Noto Serif CJK", serif;
+  line-height: 1.75;
+  margin: 1.25em 1.5em;
+  padding: 0;
   writing-mode: {direction};
+  orphans: 2;
+  widows: 2;
 }}
-h1, h2, h3, h4, h5, h6 {{
+h1 {{
   font-weight: bold;
-  margin: 1em 0 0.5em;
+  font-size: 1.55em;
+  line-height: 1.3;
+  margin: 0 0 1.25em 0;
+  padding-bottom: 0.4em;
+  text-align: center;
+  page-break-after: avoid;
+  break-after: avoid;
 }}
+h2, h3, h4, h5, h6 {{
+  font-weight: bold;
+  line-height: 1.35;
+  margin: 1.4em 0 0.7em 0;
+  page-break-after: avoid;
+  break-after: avoid;
+}}
+h2 {{ font-size: 1.3em; }}
+h3 {{ font-size: 1.15em; }}
+h4, h5, h6 {{ font-size: 1.05em; }}
 p {{
-  margin: 0.6em 0;
+  margin: 0 0 0.95em 0;
   text-indent: 1.5em;
+  line-height: 1.75;
+  text-align: justify;
 }}
 p.caption {{
   text-indent: 0;
   font-size: 0.9em;
   color: #444;
   text-align: center;
+  margin: 0.4em 0 1.2em 0;
+  line-height: 1.45;
 }}
 p.footnote {{
   text-indent: 0;
   font-size: 0.85em;
   color: #555;
+  margin: 0.5em 0;
+  line-height: 1.5;
 }}
 img {{
   max-width: 100%;
   height: auto;
   display: block;
-  margin: 1em auto;
+  margin: 1.25em auto;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}}
+div.chapter {{
+  page-break-before: always;
+  break-before: page;
 }}
 """
 
