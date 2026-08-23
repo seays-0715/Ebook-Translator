@@ -1,0 +1,92 @@
+# Build Windows EXE on GitHub-hosted windows-latest runner.
+# - Manual: Actions → "Build Windows EXE" → Run workflow
+# - Tag v*: also creates a GitHub Release and attaches the EXE + zip
+
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build EXE (PyInstaller)
+        shell: pwsh
+        run: |
+          $args = @(
+            "--noconfirm",
+            "--clean",
+            "--onefile",
+            "--windowed",
+            "--name", "EbookTranslator",
+            "--paths", ".",
+            "--add-data", "src/i18n/en.json;src/i18n",
+            "--add-data", "src/i18n/zh-HK.json;src/i18n",
+            "--hidden-import", "customtkinter",
+            "--hidden-import", "ebooklib",
+            "--hidden-import", "bs4",
+            "--hidden-import", "lxml",
+            "--hidden-import", "PIL",
+            "--hidden-import", "openai",
+            "--collect-all", "customtkinter",
+            "src/main.py"
+          )
+          python -m PyInstaller @args
+          if (-not (Test-Path "dist\EbookTranslator.exe")) {
+            throw "EXE not found after build"
+          }
+          Get-Item "dist\EbookTranslator.exe" | Format-List Name, Length, LastWriteTime
+
+      - name: Zip EXE
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist\EbookTranslator.exe" -DestinationPath "dist\EbookTranslator-windows-x64.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EbookTranslator-windows-x64
+          path: |
+            dist/EbookTranslator.exe
+            dist/EbookTranslator-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/EbookTranslator.exe
+            dist/EbookTranslator-windows-x64.zip
+          generate_release_notes: true
+          body: |
+            Windows x64 build (`EbookTranslator.exe`).
+
+            1. Download `EbookTranslator-windows-x64.zip` or the `.exe`
+            2. Unblock if Windows SmartScreen warns (Properties → Unblock)
+            3. Run `EbookTranslator.exe`
+
+            Source also available as the automatic Source code zip on this release page.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
