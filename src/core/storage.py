@@ -389,9 +389,11 @@ class Storage:
                 )
 
     def load_chunks(self, job_id: str) -> list[Chunk]:
+        # rowid = insertion order from build_chunks (reading order).
+        # Do not ORDER BY chunk_id (random suffix breaks carry-over).
         with self._tx() as conn:
             rows = conn.execute(
-                "SELECT * FROM chunks WHERE job_id = ? ORDER BY chunk_id",
+                "SELECT * FROM chunks WHERE job_id = ? ORDER BY rowid",
                 (job_id,),
             ).fetchall()
             result: list[Chunk] = []
