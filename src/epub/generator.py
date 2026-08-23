@@ -109,7 +109,12 @@ def generate_epub(
     eb.add_item(epub.EpubNav())
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Atomic write: generate to .tmp, require non-empty, then rename
     epub.write_epub(str(tmp_path), eb, {})
+    if not tmp_path.is_file() or tmp_path.stat().st_size == 0:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise RuntimeError(f"EPUB generation produced empty file: {tmp_path}")
     tmp_path.replace(output_path)
     return output_path
 
