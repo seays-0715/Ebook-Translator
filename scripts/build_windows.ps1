@@ -1,5 +1,5 @@
 # Build Windows EXE with PyInstaller
-# Usage (from repo root, in a Windows PowerShell with venv activated):
+# Usage (from repo root, in a Windows PowerShell):
 #   .\scripts\build_windows.ps1
 
 $ErrorActionPreference = "Stop"
@@ -28,4 +28,7 @@ $args = @(
 )
 
 python -m PyInstaller @args
+if (-not (Test-Path "dist\EbookTranslator.exe")) {
+  throw "EXE build failed"
+}
 Write-Host "Output: dist\EbookTranslator.exe"
