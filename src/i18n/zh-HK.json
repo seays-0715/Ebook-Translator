@@ -1,0 +1,19 @@
+{
+  "app_title": "電子書翻譯工具",
+  "start_translation": "開始翻譯",
+  "convert": "轉換 / 正規化",
+  "translate": "翻譯",
+  "glossary": "術語表建立",
+  "settings": "設定",
+  "confirm_convert": "確認並轉換",
+  "merge": "合併",
+  "split": "分割",
+  "rename": "重新命名",
+  "remove": "移除",
+  "pause": "暫停",
+  "resume": "繼續",
+  "cancel": "取消",
+  "force_export": "強制匯出（可能不完整）",
+  "job_paused_endpoint": "無法連接 Local AI（{endpoint}），Job 已自動暫停。",
+  "unsupported_schema": "不支援的 schema 版本，請重新建立 Job。"
+}

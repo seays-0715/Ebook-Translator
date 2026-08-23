@@ -1,0 +1,19 @@
+{
+  "app_title": "Ebook Translator",
+  "start_translation": "Start Translation",
+  "convert": "Convert / Normalize",
+  "translate": "Translate",
+  "glossary": "Glossary Builder",
+  "settings": "Settings",
+  "confirm_convert": "Confirm & Convert",
+  "merge": "Merge",
+  "split": "Split",
+  "rename": "Rename",
+  "remove": "Remove",
+  "pause": "Pause",
+  "resume": "Resume",
+  "cancel": "Cancel",
+  "force_export": "Force Export (may be incomplete)",
+  "job_paused_endpoint": "Cannot connect to Local AI ({endpoint}). Job auto-paused.",
+  "unsupported_schema": "Unsupported schema version. Please recreate the job."
+}
