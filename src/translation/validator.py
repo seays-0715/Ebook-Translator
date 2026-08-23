@@ -1,16 +1,22 @@
-"""Level 1 — AI Response Validation (spec §32.1).
+"""Level 1 — AI Response Validation (spec §32.1 / §20.4).
 
 Checks:
-- JSON valid (caller parses)
+- JSON object structure
+- required top-level key: translations
 - Source IDs == Output IDs
-- No duplicate IDs
-- No empty translations
-- No unexpected fields (lenient on extra keys)
+- No missing / duplicate / unknown IDs
+- Non-empty string translations
+- Strict item shape: only id + text
+- Unexpected top-level or item fields → reject
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+
+_ALLOWED_TOP = frozenset({"translations"})
+_ALLOWED_ITEM = frozenset({"id", "text"})
 
 
 @dataclass
@@ -30,10 +36,15 @@ def validate_ai_response(
     if not isinstance(payload, dict):
         return ValidationResult(ok=False, errors=["Response is not a JSON object"])
 
+    unexpected_top = set(payload.keys()) - _ALLOWED_TOP
+    if unexpected_top:
+        errors.append(f"Unexpected top-level fields: {sorted(unexpected_top)}")
+
     items = payload.get("translations")
     if not isinstance(items, list):
         return ValidationResult(
-            ok=False, errors=["Missing or invalid 'translations' array"]
+            ok=False,
+            errors=errors + ["Missing or invalid 'translations' array"],
         )
 
     seen: set[str] = set()
@@ -41,6 +52,11 @@ def validate_ai_response(
         if not isinstance(item, dict):
             errors.append(f"Item {i} is not an object")
             continue
+        unexpected_item = set(item.keys()) - _ALLOWED_ITEM
+        if unexpected_item:
+            errors.append(
+                f"Item {i} unexpected fields: {sorted(unexpected_item)}"
+            )
         bid = item.get("id")
         text = item.get("text")
         if not bid or not isinstance(bid, str):
@@ -67,4 +83,6 @@ def validate_ai_response(
     if extra:
         errors.append(f"Unknown ids: {sorted(extra)}")
 
-    return ValidationResult(ok=len(errors) == 0, errors=errors, translations=translations)
+    return ValidationResult(
+        ok=len(errors) == 0, errors=errors, translations=translations
+    )

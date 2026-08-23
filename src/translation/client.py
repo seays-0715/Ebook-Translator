@@ -71,11 +71,13 @@ class TranslationClient:
             raise TranslationError(f"Connection error: {e}", retryable=True) from e
         except APIStatusError as e:
             code = e.status_code
+            # Retryable: 5xx / 429. Non-retryable: 4xx (auth, invalid model, bad request)
             retryable = code >= 500 or code == 429
             raise TranslationError(
                 f"API status {code}: {e}", retryable=retryable
             ) from e
         except Exception as e:
+            # Invalid response format / programming errors → non-retryable
             raise TranslationError(str(e), retryable=False) from e
 
     def with_retry(self, fn, *, max_attempts: int | None = None):
