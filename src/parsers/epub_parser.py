@@ -16,12 +16,29 @@ from pathlib import Path
 from uuid import uuid4
 
 from bs4 import BeautifulSoup, NavigableString, Tag
+import ebooklib
 from ebooklib import epub
 
 from src.models.blocks import BlockType, ContentBlock
 from src.models.book import BookMetadata, CanonicalBook, Chapter, Layout
 from src.parsers.base import ParseResult
 from src.utils.images import resize_book_assets
+
+# ebooklib 0.17+ exposes ITEM_* on the top-level package, not ebooklib.epub.
+# Support both layouts for frozen EXE / pip version variance.
+def _item_type(name: str, default: int | None = None) -> int:
+    for mod in (ebooklib, epub):
+        val = getattr(mod, name, None)
+        if val is not None:
+            return int(val)
+    if default is not None:
+        return default
+    raise AttributeError(f"ebooklib has no attribute {name!r}")
+
+
+_ITEM_DOCUMENT = _item_type("ITEM_DOCUMENT", 9)
+_ITEM_IMAGE = _item_type("ITEM_IMAGE", 1)
+_ITEM_COVER = _item_type("ITEM_COVER", 10)
 
 # Tags treated as block-level content
 _BLOCK_TAGS = {
@@ -58,7 +75,7 @@ def parse_epub(path: str | Path, assets_dir: Path | None = None) -> ParseResult:
     meta = _extract_metadata(book)
     cover_ref, assets = _extract_images(book, assets_dir or path.parent / "_assets")
     assets = resize_book_assets(assets)
-    spine_items = list(book.get_items_of_type(epub.ITEM_DOCUMENT))
+    spine_items = list(book.get_items_of_type(_ITEM_DOCUMENT))
 
     # Build flat list of (suggested_title, blocks) from spine
     raw_chapters: list[tuple[str, list[ContentBlock]]] = []
@@ -127,21 +144,22 @@ def _extract_images(
 
     # Cover
     for item in book.get_items():
-        if item.get_type() == epub.ITEM_COVER or (
+        itype = item.get_type()
+        is_cover = itype == _ITEM_COVER or (
             hasattr(item, "id") and item.id and "cover" in str(item.id).lower()
-        ):
-            if item.get_type() in (epub.ITEM_IMAGE, epub.ITEM_COVER):
-                key = f"cover_{uuid4().hex[:8]}"
-                ext = Path(item.get_name()).suffix or ".jpg"
-                rel = f"{key}{ext}"
-                out = assets_dir / rel
-                out.write_bytes(item.get_content())
-                assets[key] = str(out)
-                cover_ref = key
-                break
+        )
+        if is_cover and itype in (_ITEM_IMAGE, _ITEM_COVER):
+            key = f"cover_{uuid4().hex[:8]}"
+            ext = Path(item.get_name()).suffix or ".jpg"
+            rel = f"{key}{ext}"
+            out = assets_dir / rel
+            out.write_bytes(item.get_content())
+            assets[key] = str(out)
+            cover_ref = key
+            break
 
     # Body images
-    for item in book.get_items_of_type(epub.ITEM_IMAGE):
+    for item in book.get_items_of_type(_ITEM_IMAGE):
         name = item.get_name()
         key = f"img_{uuid4().hex[:8]}"
         ext = Path(name).suffix or ".jpg"
