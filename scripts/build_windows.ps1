@@ -17,6 +17,7 @@ $args = @(
   "--paths", ".",
   "--add-data", "src/i18n/en.json;src/i18n",
   "--add-data", "src/i18n/zh-HK.json;src/i18n",
+  "--add-data", "src/i18n/zh-TW.json;src/i18n",
   "--hidden-import", "customtkinter",
   "--hidden-import", "ebooklib",
   "--hidden-import", "bs4",
