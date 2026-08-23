@@ -11,6 +11,10 @@ on:
       - ".github/workflows/release.yml"
   workflow_dispatch:
 
+concurrency:
+  group: windows-exe-release
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -82,13 +86,11 @@ jobs:
           $tag = "v${{ steps.version.outputs.version }}"
           Write-Host "Release tag: $tag"
 
-          $exists = $false
-          gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            $exists = $true
-          }
+          # Does a Release object already exist?
+          gh release view $tag 2>$null | Out-Null
+          $releaseExists = ($LASTEXITCODE -eq 0)
 
-          if ($exists) {
+          if ($releaseExists) {
             Write-Host "Release $tag exists — uploading asset with --clobber"
             gh release upload $tag dist/EbookTranslator.exe --clobber
             if ($LASTEXITCODE -ne 0) {
@@ -96,9 +98,23 @@ jobs:
             }
           } else {
             Write-Host "Creating release $tag"
+            # Tag may already exist without a Release; prefer --existing-tag fallback
             gh release create $tag dist/EbookTranslator.exe --title "Ebook Translator $tag" --generate-notes
             if ($LASTEXITCODE -ne 0) {
-              throw "gh release create failed for $tag (exit $LASTEXITCODE)"
+              Write-Host "create failed — retry with --existing-tag"
+              gh release create $tag dist/EbookTranslator.exe --title "Ebook Translator $tag" --generate-notes --existing-tag
+              if ($LASTEXITCODE -ne 0) {
+                # Last resort: release may have been created by a concurrent run
+                gh release view $tag 2>$null | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                  gh release upload $tag dist/EbookTranslator.exe --clobber
+                  if ($LASTEXITCODE -ne 0) {
+                    throw "gh release upload failed for $tag after concurrent create"
+                  }
+                } else {
+                  throw "gh release create failed for $tag"
+                }
+              }
             }
           }
 
