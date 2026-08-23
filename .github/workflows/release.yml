@@ -47,26 +47,59 @@ jobs:
       - name: Build Windows EXE
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           pyinstaller --noconfirm --clean --onefile --windowed --name EbookTranslator src/main.py
-          if (-not (Test-Path "dist/EbookTranslator.exe")) { throw "EXE build failed" }
+          if (-not (Test-Path "dist/EbookTranslator.exe")) {
+            throw "EXE build failed: dist/EbookTranslator.exe does not exist"
+          }
+          Get-Item "dist/EbookTranslator.exe" | Format-List Name, Length, FullName
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EbookTranslator-windows
+          path: dist/EbookTranslator.exe
+          if-no-files-found: error
 
       - name: Read version
         id: version
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $version = (Select-String -Path pyproject.toml -Pattern '^version = "([^"]+)"$').Matches.Groups[1].Value
-          if ([string]::IsNullOrWhiteSpace($version)) { throw "Could not determine project version" }
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Could not determine project version from pyproject.toml"
+          }
+          Write-Host "version=$version"
           "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $tag = "v${{ steps.version.outputs.version }}"
+          Write-Host "Release tag: $tag"
+
+          $exists = $false
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag dist/EbookTranslator.exe --clobber
-          } else {
-            gh release create $tag dist/EbookTranslator.exe --title "Ebook Translator $tag" --generate-notes
+            $exists = $true
           }
+
+          if ($exists) {
+            Write-Host "Release $tag exists — uploading asset with --clobber"
+            gh release upload $tag dist/EbookTranslator.exe --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "gh release upload failed for $tag (exit $LASTEXITCODE)"
+            }
+          } else {
+            Write-Host "Creating release $tag"
+            gh release create $tag dist/EbookTranslator.exe --title "Ebook Translator $tag" --generate-notes
+            if ($LASTEXITCODE -ne 0) {
+              throw "gh release create failed for $tag (exit $LASTEXITCODE)"
+            }
+          }
+
+          Write-Host "Release $tag updated successfully"
