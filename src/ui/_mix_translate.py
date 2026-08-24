@@ -12,6 +12,7 @@ import sys
 from src.core.languages import normalize_code
 from src.models.job import JobStatus
 from src.queue.batch_queue import BatchQueue
+from src.translation.prompts import default_prompt_for_style
 from src.utils.power import after_completion_action
 from src.ui.paths import ebook_filetypes
 from src.ui._common import (
@@ -65,8 +66,7 @@ class TranslateMixin:
             gloss_row, text=_t("refresh"), width=70, command=self._refresh_glossary_dropdowns
         ).pack(side="left", padx=4)
 
-        # Translation-task config (Source / Target / Style) — not Settings
-        # Languages: display names from registry; jobs store stable codes.
+        # Translation-task config (Source / Target / Style / Prompt) — not Settings
         cfg_row = ctk.CTkFrame(page)
         cfg_row.pack(fill="x", pady=4, padx=4)
 
@@ -101,15 +101,36 @@ class TranslateMixin:
         st = (ts.style or "fiction").lower()
         st_code = "nonfiction" if "non" in st else "fiction"
         self._tr_style_var = ctk.StringVar(value=_style_label(st_code))
-        ctk.CTkOptionMenu(
-            cfg_row, variable=self._tr_style_var, values=style_labels, width=120
-        ).pack(side="left", padx=2)
+        self._tr_style_menu = ctk.CTkOptionMenu(
+            cfg_row,
+            variable=self._tr_style_var,
+            values=style_labels,
+            width=120,
+            command=self._on_style_changed,
+        )
+        self._tr_style_menu.pack(side="left", padx=2)
+
+        # Prompt editor (task-level; frozen into Job at Start)
+        prompt_hdr = ctk.CTkFrame(page)
+        prompt_hdr.pack(fill="x", padx=4, pady=(4, 0))
+        ctk.CTkLabel(prompt_hdr, text=_t("label_prompt"), font=("", 12, "bold")).pack(
+            side="left", padx=4
+        )
+        ctk.CTkButton(
+            prompt_hdr,
+            text=_t("reset_to_default"),
+            width=120,
+            command=self._reset_translate_prompt,
+        ).pack(side="right", padx=4)
+        self._tr_prompt_box = ctk.CTkTextbox(page, height=72, font=("", 12))
+        self._tr_prompt_box.pack(fill="x", padx=4, pady=2)
+        self._load_prompt_for_style(st_code)
 
         # Queue item list with lifecycle actions
         mid = ctk.CTkFrame(page)
         mid.pack(fill="both", expand=False, pady=4)
         ctk.CTkLabel(mid, text=_t("queue_items"), font=("", 13, "bold")).pack(anchor="w")
-        self.queue_list = ctk.CTkScrollableFrame(mid, height=160)
+        self.queue_list = ctk.CTkScrollableFrame(mid, height=140)
         self.queue_list.pack(fill="x", expand=False)
 
         prog = ctk.CTkFrame(page)
@@ -138,8 +159,70 @@ class TranslateMixin:
         except Exception:
             pass
 
-        self.translate_log = ctk.CTkTextbox(page, font=("Consolas", 13), height=120)
+        self.translate_log = ctk.CTkTextbox(page, font=("Consolas", 13), height=100)
         self.translate_log.pack(fill="both", expand=True, pady=8)
+
+    def _prompt_for_style(self, style_code: str) -> str:
+        """Saved custom for style, else built-in default template."""
+        if style_code == "nonfiction":
+            custom = getattr(self.settings.translation, "nonfiction_prompt", "") or ""
+        else:
+            custom = getattr(self.settings.translation, "fiction_prompt", "") or ""
+        if custom.strip():
+            return custom
+        # Also honor legacy single prompt field
+        legacy = (self.settings.translation.prompt or "").strip()
+        if legacy:
+            return legacy
+        return default_prompt_for_style(style_code)
+
+    def _load_prompt_for_style(self, style_code: str) -> None:
+        box = getattr(self, "_tr_prompt_box", None)
+        if box is None:
+            return
+        try:
+            box.delete("1.0", "end")
+            box.insert("1.0", self._prompt_for_style(style_code))
+        except Exception:
+            log.exception("load prompt for style")
+
+    def _on_style_changed(self, _choice: str = "") -> None:
+        """When Style changes, load that style's prompt template/custom."""
+        try:
+            _, _, style = self._translation_page_config()
+        except Exception:
+            style = "fiction"
+        self._load_prompt_for_style(style)
+
+    def _reset_translate_prompt(self) -> None:
+        try:
+            _, _, style = self._translation_page_config()
+        except Exception:
+            style = "fiction"
+        box = getattr(self, "_tr_prompt_box", None)
+        if box is None:
+            return
+        box.delete("1.0", "end")
+        box.insert("1.0", default_prompt_for_style(style))
+
+    def _read_translate_prompt(self) -> str:
+        box = getattr(self, "_tr_prompt_box", None)
+        if box is None:
+            return ""
+        try:
+            return box.get("1.0", "end").strip()
+        except Exception:
+            return ""
+
+    def _persist_translate_prompt(self, style: str, text: str) -> None:
+        """Save custom prompt per style (empty if matches built-in)."""
+        builtin = default_prompt_for_style(style).strip()
+        custom = "" if (text or "").strip() == builtin else (text or "").strip()
+        if style == "nonfiction":
+            self.settings.translation.nonfiction_prompt = custom
+        else:
+            self.settings.translation.fiction_prompt = custom
+        self.settings.translation.prompt = custom
 
     def _refresh_queue_list(self) -> None:
         ctk = _ctk()
@@ -348,7 +431,6 @@ class TranslateMixin:
         err = (getattr(item, "error", None) or "") or ""
         if err.startswith("export_failed:") or err.startswith("Export failed"):
             return _t("export_failed_msg")
-        # Try job-level failed chapter count if available
         try:
             if item.job_id and self.storage:
                 job = self.storage.load_job(item.job_id)
@@ -406,7 +488,6 @@ class TranslateMixin:
             return
         if not paths:
             return
-        # Use global Output Directory setting (default: <EXE>/output)
         if hasattr(self, "_resolved_output_dir"):
             self._translate_output_dir = self._resolved_output_dir()
         else:
@@ -438,19 +519,19 @@ class TranslateMixin:
             )
             return
         try:
-            # Freeze current Translation-page task config into queue for NEW jobs only.
-            # Existing jobs already hold their own JobConfig snapshot.
-            if hasattr(self, "_job_config_from_settings"):
-                self._queue.config = self._job_config_from_settings()
-            # Persist Source/Target/Style as defaults for next session seed
+            # Persist Source/Target/Style/Prompt as defaults for next session
             try:
                 src, tgt, style = self._translation_page_config()
                 self.settings.translation.source_language = src
                 self.settings.translation.target_language = tgt
                 self.settings.translation.style = style
+                self._persist_translate_prompt(style, self._read_translate_prompt())
                 self.settings.save(self.settings_path)
             except Exception:
                 log.exception("persist translation page defaults")
+            # Freeze current Translation-page task config into queue for NEW jobs only.
+            if hasattr(self, "_job_config_from_settings"):
+                self._queue.config = self._job_config_from_settings()
             self._queue.glossary = self._selected_glossary_entries()
             try:
                 mode = self._current_conversion_mode()
@@ -492,12 +573,7 @@ class TranslateMixin:
             threading.Thread(target=self._watch_queue, daemon=True).start()
 
     def _refresh_glossary_dropdowns(self) -> None:
-        """Populate both selectors with the same list of all glossaries.
-
-        Global Glossary / Book Glossary are two independent selection slots
-        only — not different glossary types or scopes. Any glossary may be
-        chosen in either slot (or None).
-        """
+        """Populate both selectors with the same list of all glossaries."""
         none_label = _t("glossary_none")
         labels = [none_label]
         self._gloss_label_to_id: dict[str, str] = {}
@@ -527,11 +603,7 @@ class TranslateMixin:
             pass
 
     def _selected_glossary_entries(self) -> list[dict[str, str]]:
-        """Merge confirmed entries from the two independent selector slots.
-
-        Same semantics for both slots — no Global/Book term behavior difference.
-        Duplicate sources are deduplicated (first selector wins).
-        """
+        """Merge confirmed entries from the two independent selector slots."""
         entries: list[dict[str, str]] = []
         seen: set[str] = set()
         store = getattr(self, "glossary_store", None) or getattr(
