@@ -157,5 +157,14 @@
   "scope_book": "本書",
   "label_output_dir": "輸出目錄",
   "browse": "瀏覽",
-  "reset_output_dir": "重設輸出目錄"
+  "reset_output_dir": "重設輸出目錄",
+  "retry": "重試",
+  "open_file_action": "開啟檔案",
+  "open_folder_action": "開啟資料夾",
+  "output_path_line": "輸出：{path}",
+  "export_failed_msg": "翻譯已完成，但 EPUB 匯出失敗。",
+  "translation_failed_msg": "翻譯失敗。",
+  "chapters_failed_summary": "{n} 個章節失敗",
+  "retry_started": "已開始重試（使用凍結的任務設定）",
+  "output_missing": "找不到輸出檔案。"
 }
