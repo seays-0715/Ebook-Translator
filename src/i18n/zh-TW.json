@@ -86,7 +86,7 @@
   "label_chunk_tokens": "Chunk 目標 tokens",
   "label_carry_over": "延續段落數",
   "label_prompt": "系統提示詞（可選）",
-  "hint_prompt": "留空則使用內建預設。只影響新建的 Job。",
+  "hint_prompt": "未自訂時顯示內建預設。可編輯並儲存。僅套用至新工作。",
   "label_timeout": "逾時（秒）",
   "label_retry_count": "重試次數",
   "label_retry_delay": "重試延遲（秒）",
@@ -154,5 +154,8 @@
   "reset_to_default": "重設為預設",
   "delete_glossary": "刪除術語表",
   "scope_global": "全域",
-  "scope_book": "本書"
+  "scope_book": "本書",
+  "label_output_dir": "輸出目錄",
+  "browse": "瀏覽",
+  "reset_output_dir": "重設輸出目錄"
 }
