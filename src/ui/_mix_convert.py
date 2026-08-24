@@ -23,7 +23,7 @@ from src.models.job import JobConfig, JobStatus
 from src.queue.batch_queue import BatchQueue
 from src.utils.power import after_completion_action
 from src.ui.paths import assets_dir_for, data_dir, ebook_filetypes
-from src.ui._common import _ctk, _t, _relaunch_process, log
+from src.ui._common import _ctk, _t, _relaunch_process, format_chapter_list_label, log
 from src.ui._common import (
     _INTERFACE_LANG_CODES,
     _SOURCE_LANG_CODES,
@@ -241,14 +241,8 @@ class ConvertMixin:
             return
         for ch in self._preview_book.chapters:
             self._chapter_ids.append(ch.id)
-            title = ch.title or _t("untitled_chapter")
-            # Titles only — no body snippet in the list
-            label = _t(
-                "chapter_row_compact",
-                n=ch.order + 1,
-                title=title,
-                blocks=len(ch.blocks),
-            )
+            # Titles only — no body snippet, no block counts
+            label = format_chapter_list_label(ch.order, ch.title)
             selected = ch.id == self._selected_chapter_id
             btn = ctk.CTkButton(
                 self.chapter_list,
