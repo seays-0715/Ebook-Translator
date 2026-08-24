@@ -94,6 +94,8 @@ class SettingsMixin:
         field("api_key", "label_api_key", self.settings.ai.api_key)
 
         section("settings_translation")
+        # Source/Target/Style are configured on the Translation page.
+        # Here: chunk size + optional system prompt defaults only.
 
         def _src_label(code: str) -> str:
             if code == "auto":
@@ -125,32 +127,6 @@ class SettingsMixin:
                 "en": _t("lang_en"),
             }.get(code, code)
 
-        dropdown(
-            "source_language",
-            "label_source_lang",
-            _SOURCE_LANG_CODES,
-            self.settings.translation.source_language,
-            _src_label,
-        )
-        dropdown(
-            "target_language",
-            "label_target_lang",
-            _TARGET_LANG_CODES,
-            self.settings.translation.target_language,
-            _tgt_label,
-        )
-
-        def _resolve_style_code(label: str | None = None) -> str:
-            try:
-                cur = label
-                if cur is None:
-                    lab = entries.get("style")
-                    cur = lab.get() if lab is not None and hasattr(lab, "get") else ""
-                if _t("style_nonfiction") in str(cur) or "nonfiction" in str(cur).lower():
-                    return "nonfiction"
-            except Exception:
-                pass
-            return "fiction"
 
         def _prompt_for_style(style_code: str) -> str:
             """Saved custom for style, else built-in default (never blank)."""
@@ -164,21 +140,7 @@ class SettingsMixin:
                 return custom
             return default_prompt_for_style(style_code)
 
-        def _on_style_change(choice: str) -> None:
-            """When Style switches, show that style's custom or built-in default."""
-            code = _resolve_style_code(choice)
-            text = _prompt_for_style(code)
-            prompt_box.delete("1.0", "end")
-            prompt_box.insert("1.0", text)
 
-        dropdown(
-            "style",
-            "label_style",
-            _STYLE_CODES,
-            self.settings.translation.style,
-            _style_label,
-            on_change=_on_style_change,
-        )
         field(
             "chunk_target_tokens",
             "label_chunk_tokens",
@@ -207,7 +169,8 @@ class SettingsMixin:
 
         def _reset_prompt() -> None:
             from src.translation.prompts import default_prompt_for_style
-            style_code = _resolve_style_code()
+            _st = (self.settings.translation.style or "fiction").lower()
+            style_code = "nonfiction" if "non" in _st else "fiction"
             prompt_box.delete("1.0", "end")
             prompt_box.insert("1.0", default_prompt_for_style(style_code))
 
@@ -346,33 +309,30 @@ class SettingsMixin:
                 self.settings.ai.endpoint_fail_threshold = _get_int(
                     "endpoint_fail_threshold", 3
                 )
-                self.settings.translation.source_language = _get("source_language")
-                self.settings.translation.target_language = _get("target_language")
-                self.settings.translation.style = _get("style")
+                # Source/Target/Style live on Translation page (task config).
+                # Settings only persists prompt defaults + chunk params.
                 self.settings.translation.chunk_target_tokens = _get_int(
                     "chunk_target_tokens", 1000
                 )
                 self.settings.translation.carry_over_paragraphs = _get_int(
                     "carry_over_paragraphs", 2
                 )
-                self.settings.translation.prompt = _get("prompt")
-                _psave = (self.settings.translation.prompt or "").strip()
-                _stsave = (self.settings.translation.style or "fiction").lower()
-                from src.translation.prompts import default_prompt_for_style
+                if "prompt" in entries:
+                    self.settings.translation.prompt = _get("prompt")
+                    _psave = (self.settings.translation.prompt or "").strip()
+                    _stsave = (self.settings.translation.style or "fiction").lower()
+                    from src.translation.prompts import default_prompt_for_style
 
-                if "non" in _stsave:
-                    self.settings.translation.style = "nonfiction"
-                    # Store empty when user kept / reset to built-in default
-                    builtin = default_prompt_for_style("nonfiction").strip()
-                    self.settings.translation.nonfiction_prompt = (
-                        "" if _psave == builtin else _psave
-                    )
-                else:
-                    self.settings.translation.style = "fiction"
-                    builtin = default_prompt_for_style("fiction").strip()
-                    self.settings.translation.fiction_prompt = (
-                        "" if _psave == builtin else _psave
-                    )
+                    if "non" in _stsave:
+                        builtin = default_prompt_for_style("nonfiction").strip()
+                        self.settings.translation.nonfiction_prompt = (
+                            "" if _psave == builtin else _psave
+                        )
+                    else:
+                        builtin = default_prompt_for_style("fiction").strip()
+                        self.settings.translation.fiction_prompt = (
+                            "" if _psave == builtin else _psave
+                        )
                 self.settings.output.after_completion = (
                     _get("after_completion") or "nothing"
                 )
