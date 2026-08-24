@@ -45,7 +45,7 @@ class JobConfig(BaseModel):
     # Frozen prompt-list snapshot: [{source, target, type?, notes?}, ...]
     glossary_entries: list[dict[str, str]] = Field(default_factory=list)
     prompt: str = ""
-    style: str = "natural"
+    style: str = "fiction"  # fiction | nonfiction
     chunk_target_tokens: int = 1000
     carry_over_paragraphs: int = 2
     retry_count: int = 3
