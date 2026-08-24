@@ -102,12 +102,8 @@ class SettingsMixin:
 
         def _style_label(code: str) -> str:
             return {
-                "auto": _t("style_auto"),
-                "natural": _t("style_natural"),
-                "faithful": _t("style_faithful"),
-                "literary": _t("style_literary"),
-                "light_novel": _t("style_light_novel"),
-                "custom": _t("style_custom"),
+                "fiction": _t("style_fiction"),
+                "nonfiction": _t("style_nonfiction"),
             }.get(code, code)
 
         def _after_label(code: str) -> str:
@@ -162,12 +158,39 @@ class SettingsMixin:
         )
         prompt_box = ctk.CTkTextbox(scroll, height=100)
         prompt_box.pack(fill="x", pady=2)
-        if self.settings.translation.prompt:
-            prompt_box.insert("1.0", self.settings.translation.prompt)
+        # Load style-specific saved prompt, else empty (default used at runtime)
+        _st = (self.settings.translation.style or "fiction").lower()
+        _saved = (
+            self.settings.translation.fiction_prompt
+            if _st.startswith("fiction")
+            else self.settings.translation.nonfiction_prompt
+        )
+        _initial = self.settings.translation.prompt or _saved or ""
+        if _initial:
+            prompt_box.insert("1.0", _initial)
         entries["prompt"] = prompt_box
         ctk.CTkLabel(scroll, text=_t("hint_prompt"), anchor="w").pack(
             anchor="w", padx=4
         )
+
+        def _reset_prompt() -> None:
+            from src.translation.prompts import default_prompt_for_style
+            style_code = "fiction"
+            # resolve current style from dropdown if available
+            try:
+                lab = entries.get("style")
+                if lab is not None:
+                    cur = lab.get() if hasattr(lab, "get") else str(lab)
+                    if _t("style_nonfiction") in str(cur) or "nonfiction" in str(cur).lower():
+                        style_code = "nonfiction"
+            except Exception:
+                pass
+            prompt_box.delete("1.0", "end")
+            prompt_box.insert("1.0", default_prompt_for_style(style_code))
+
+        ctk.CTkButton(
+            scroll, text=_t("reset_to_default"), command=_reset_prompt, width=140
+        ).pack(anchor="w", pady=4)
 
         section("settings_retry")
         field(
@@ -270,6 +293,14 @@ class SettingsMixin:
                     "carry_over_paragraphs", 2
                 )
                 self.settings.translation.prompt = _get("prompt")
+                _psave = self.settings.translation.prompt or ""
+                _stsave = (self.settings.translation.style or "fiction").lower()
+                if "non" in _stsave:
+                    self.settings.translation.style = "nonfiction"
+                    self.settings.translation.nonfiction_prompt = _psave
+                else:
+                    self.settings.translation.style = "fiction"
+                    self.settings.translation.fiction_prompt = _psave
                 self.settings.output.after_completion = (
                     _get("after_completion") or "nothing"
                 )
