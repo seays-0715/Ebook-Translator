@@ -9,16 +9,18 @@ import os
 import subprocess
 import sys
 
+from src.core.languages import normalize_code
 from src.models.job import JobStatus
 from src.queue.batch_queue import BatchQueue
 from src.utils.power import after_completion_action
 from src.ui.paths import ebook_filetypes
 from src.ui._common import (
-    _SOURCE_LANG_CODES,
     _STYLE_CODES,
-    _TARGET_LANG_CODES,
     _ctk,
     _t,
+    language_code_to_label,
+    language_display_labels,
+    language_label_to_code,
     log,
 )
 
@@ -64,11 +66,9 @@ class TranslateMixin:
         ).pack(side="left", padx=4)
 
         # Translation-task config (Source / Target / Style) — not Settings
+        # Languages: display names from registry; jobs store stable codes.
         cfg_row = ctk.CTkFrame(page)
         cfg_row.pack(fill="x", pady=4, padx=4)
-
-        def _src_label(code: str) -> str:
-            return _t("src_auto") if code == "auto" else code
 
         def _style_label(code: str) -> str:
             return {
@@ -76,32 +76,25 @@ class TranslateMixin:
                 "nonfiction": _t("style_nonfiction"),
             }.get(code, code)
 
-        # Seed from persisted Settings defaults; job freezes values at start
         ts = self.settings.translation
-        src_codes = list(_SOURCE_LANG_CODES)
-        tgt_codes = list(_TARGET_LANG_CODES)
+        lang_labels = language_display_labels()
         style_codes = list(_STYLE_CODES)
-        src_labels = [_src_label(c) for c in src_codes]
-        tgt_labels = list(tgt_codes)
         style_labels = [_style_label(c) for c in style_codes]
-        self._tr_src_l2c = dict(zip(src_labels, src_codes))
-        self._tr_tgt_l2c = dict(zip(tgt_labels, tgt_codes))
         self._tr_style_l2c = dict(zip(style_labels, style_codes))
 
+        src_code = normalize_code(ts.source_language or "ja")
+        tgt_code = normalize_code(ts.target_language or "zh-Hant")
+
         ctk.CTkLabel(cfg_row, text=_t("label_source_lang")).pack(side="left", padx=4)
-        self._tr_src_var = ctk.StringVar(
-            value=_src_label(ts.source_language or "auto")
-        )
+        self._tr_src_var = ctk.StringVar(value=language_code_to_label(src_code))
         ctk.CTkOptionMenu(
-            cfg_row, variable=self._tr_src_var, values=src_labels, width=110
+            cfg_row, variable=self._tr_src_var, values=lang_labels, width=160
         ).pack(side="left", padx=2)
 
         ctk.CTkLabel(cfg_row, text=_t("label_target_lang")).pack(side="left", padx=4)
-        self._tr_tgt_var = ctk.StringVar(
-            value=ts.target_language or "zh-TW"
-        )
+        self._tr_tgt_var = ctk.StringVar(value=language_code_to_label(tgt_code))
         ctk.CTkOptionMenu(
-            cfg_row, variable=self._tr_tgt_var, values=tgt_labels, width=100
+            cfg_row, variable=self._tr_tgt_var, values=lang_labels, width=160
         ).pack(side="left", padx=2)
 
         ctk.CTkLabel(cfg_row, text=_t("label_style")).pack(side="left", padx=4)
@@ -210,7 +203,7 @@ class TranslateMixin:
                     command=lambda iid=item.item_id: self._queue_remove(iid),
                 ).pack(side="right", padx=2)
             elif item.status == JobStatus.COMPLETED_WITH_ERRORS:
-                summary = self._user_error_summary(item)
+                summary = self._readable_error_summary(item)
                 if summary:
                     ctk.CTkLabel(frame, text=summary, anchor="w").pack(
                         fill="x", padx=8
@@ -318,20 +311,27 @@ class TranslateMixin:
         self.root.after(0, ui)
 
     def _translation_page_config(self) -> tuple[str, str, str]:
-        """Read Source / Target / Style from Translation page controls."""
-        src = "auto"
-        tgt = "zh-TW"
+        """Read Source / Target / Style from Translation page controls.
+
+        Returns stable language codes (registry) and style code.
+        """
+        src = "ja"
+        tgt = "zh-Hant"
         style = "fiction"
         try:
             lab = self._tr_src_var.get()
-            src = self._tr_src_l2c.get(lab, lab) or "auto"
+            src = language_label_to_code(lab)
         except Exception:
-            src = getattr(self.settings.translation, "source_language", None) or "auto"
+            src = normalize_code(
+                getattr(self.settings.translation, "source_language", None) or "ja"
+            )
         try:
             lab = self._tr_tgt_var.get()
-            tgt = self._tr_tgt_l2c.get(lab, lab) or "zh-TW"
+            tgt = language_label_to_code(lab)
         except Exception:
-            tgt = getattr(self.settings.translation, "target_language", None) or "zh-TW"
+            tgt = normalize_code(
+                getattr(self.settings.translation, "target_language", None) or "zh-Hant"
+            )
         try:
             lab = self._tr_style_var.get()
             style = self._tr_style_l2c.get(lab, "fiction")
@@ -343,7 +343,7 @@ class TranslateMixin:
             style = "fiction"
         return src, tgt, style
 
-    def _user_error_summary(self, item) -> str:
+    def _readable_error_summary(self, item) -> str:
         """Short human-readable summary; no stack traces."""
         err = (getattr(item, "error", None) or "") or ""
         if err.startswith("export_failed:") or err.startswith("Export failed"):
