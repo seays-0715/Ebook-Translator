@@ -16,10 +16,10 @@ from src.models.book import Chapter
 
 _TECH_NAME_RE = re.compile(
     r"^(?:"
-    r"p[-_]?\d+|"
-    r"item[-_]?\d+|"
-    r"sec(?:tion)?[-_]?\d+|"
-    r"chap(?:ter)?[-_]?\d+|"
+    r"p[-_]?\d+|"               # P001, p12, p-005, p_006
+    r"item[-_]?\d+|"            # item001, item-12
+    r"sec(?:tion)?[-_]?\d+|"    # sec01, section1
+    r"chap(?:ter)?[-_]?\d+|"    # chap_1, chapter01, chap-0004, chap_0004
     r"part[-_]?\d+|"
     r"page[-_]?\d+|"
     r"xhtml?[-_]?\d+|"
@@ -27,7 +27,17 @@ _TECH_NAME_RE = re.compile(
     r"content[-_]?\d+|"
     r"doc(?:ument)?[-_]?\d+|"
     r"OEBPS.*|"
-    r"index[-_]?\d*"
+    r"index[-_]?\d*|"
+    # front-matter / structural resource labels (not user chapter titles)
+    r"title[-_]?page|"
+    r"p[-_]?titlepage|"
+    r"p[-_]?fmatter|"
+    r"p[-_]?toc|"
+    r"toc|"
+    r"nav|"
+    r"cover|"
+    r"colophon|"
+    r"copyright"
     r")$",
     re.IGNORECASE,
 )
@@ -51,6 +61,7 @@ _MAX_TITLE_LEN = 80
 
 
 def _is_technical_filename(name: str) -> bool:
+    """True if name looks like a spine/XHTML/page technical id, not a title."""
     stem = Path(str(name)).stem.strip()
     if not stem:
         return True
@@ -64,6 +75,7 @@ def _is_technical_filename(name: str) -> bool:
 
 
 def _looks_like_chapter_title(text: str) -> bool:
+    """True when text is a semantic chapter title (not body, not technical id)."""
     t = (text or "").strip()
     if not t or len(t) > _MAX_TITLE_LEN:
         return False
@@ -81,6 +93,7 @@ def _looks_like_chapter_title(text: str) -> bool:
 
 
 def _title_from_block(block: ContentBlock) -> str | None:
+    """Return chapter title if this block is a chapter boundary marker."""
     t = (block.text or "").strip()
     if not t or _is_technical_filename(t):
         return None
