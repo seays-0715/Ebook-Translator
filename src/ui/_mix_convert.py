@@ -351,16 +351,23 @@ class ConvertMixin:
                 _t("info"), _t("open_analyze_first"), parent=self.root
             )
             return
+        from src.ui.paths import resolve_output_dir
+
+        out_dir = resolve_output_dir(
+            getattr(self.settings.output, "default_dir", None)
+        )
+        initial = (
+            f"{self._preview_source.stem}.epub"
+            if self._preview_source
+            else "output.epub"
+        )
         try:
             out = filedialog.asksaveasfilename(
                 parent=self.root,
                 defaultextension=".epub",
                 filetypes=[(_t("filetypes_epub"), "*.epub")],
-                initialfile=(
-                    f"{self._preview_source.stem}.epub"
-                    if self._preview_source
-                    else "output.epub"
-                ),
+                initialdir=str(out_dir),
+                initialfile=initial,
             )
         except Exception as e:
             self._show_error("error_open_file", str(e))
@@ -368,13 +375,20 @@ class ConvertMixin:
         if not out:
             return
         try:
-            generate_epub(self._preview_book, out, conversion_mode=self._current_conversion_mode())
+            generate_epub(
+                self._preview_book, out, conversion_mode=self._current_conversion_mode()
+            )
         except Exception as e:
             log.exception("generate_epub failed")
             self._show_error("error", str(e))
             return
         self.convert_status.configure(text=_t("wrote_file", path=out))
         messagebox.showinfo(_t("done"), _t("wrote_file", path=out), parent=self.root)
+
+    def _resolved_output_dir(self) -> Path:
+        from src.ui.paths import resolve_output_dir
+
+        return resolve_output_dir(getattr(self.settings.output, "default_dir", None))
 
     def _send_preview_to_translate(self) -> None:
 
@@ -383,14 +397,7 @@ class ConvertMixin:
                 _t("info"), _t("open_analyze_first"), parent=self.root
             )
             return
-        try:
-            out = filedialog.askdirectory(parent=self.root, title=_t("output_folder"))
-        except Exception as e:
-            self._show_error("error_open_file", str(e))
-            return
-        if not out:
-            return
-        self._translate_output_dir = Path(out)
+        self._translate_output_dir = self._resolved_output_dir()
         # Ensure queue exists with current settings
         self._ensure_queue()
         assert self._queue is not None
