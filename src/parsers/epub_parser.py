@@ -1,6 +1,7 @@
 """EPUB parser — thin wrapper; see chapter_detect for detection."""
 from __future__ import annotations
 
+import re
 import warnings
 from pathlib import Path
 from uuid import uuid4
@@ -120,6 +121,42 @@ def parse_epub(path: str | Path, assets_dir: Path | None = None) -> ParseResult:
     )
 
 
+_FRONT_MATTER_NAME_RE = re.compile(
+    r"(?:^|/)(?:"
+    r"cover|"
+    r"title[-_]?page|"
+    r"p[-_]?titlepage|"
+    r"titlepage|"
+    r"front[-_]?matter|"
+    r"p[-_]?fmatter|"
+    r"colophon|"
+    r"copyright|"
+    r"imprint|"
+    r"half[-_]?title|"
+    r"dedication"
+    r")(?:\.|$)",
+    re.IGNORECASE,
+)
+
+
+def _is_front_matter_item(item) -> bool:
+    """True for cover / title-page / front-matter / nav / toc documents."""
+    name = (item.get_name() or "") if hasattr(item, "get_name") else ""
+    low = name.lower().replace("\\", "/")
+    base = Path(low).name
+    stem = Path(base).stem
+    if any(k in base for k in ("nav.xhtml", "toc.xhtml", "toc.ncx", "nav.ncx", "ncx")):
+        return True
+    if _FRONT_MATTER_NAME_RE.search(low) or _FRONT_MATTER_NAME_RE.search(stem):
+        return True
+    iid = str(getattr(item, "id", "") or "").lower()
+    if iid in ("nav", "ncx", "cover", "titlepage", "title-page", "frontmatter"):
+        return True
+    if "cover" in iid and "chapter" not in iid:
+        return True
+    return False
+
+
 def _iter_spine_documents(book: epub.EpubBook):
     id_map: dict[str, object] = {}
     for item in book.get_items():
@@ -135,9 +172,13 @@ def _iter_spine_documents(book: epub.EpubBook):
     spine = getattr(book, "spine", None) or []
     for entry in spine:
         idref = entry[0] if isinstance(entry, (list, tuple)) else entry
-        if idref in ("nav", "ncx", "cover", "titlepage"):
+        if isinstance(idref, str) and idref.lower() in ("nav", "ncx", "cover", "titlepage"):
             continue
-        item = id_map.get(str(idref))
+        # Spine may hold the item object itself (before write) or an id string.
+        if hasattr(idref, "get_name"):
+            item = idref
+        else:
+            item = id_map.get(str(idref))
         if item is None:
             continue
         try:
@@ -146,16 +187,14 @@ def _iter_spine_documents(book: epub.EpubBook):
             itype = None
         if itype is not None and itype != _ITEM_DOCUMENT:
             continue
-        name = (item.get_name() or "").lower()
-        if any(k in name for k in ("nav.xhtml", "toc.xhtml", "toc.ncx", "nav.ncx")):
+        if _is_front_matter_item(item):
             continue
         yielded = True
         yield item
 
     if not yielded:
         for item in book.get_items_of_type(_ITEM_DOCUMENT):
-            name = (item.get_name() or "").lower()
-            if any(k in name for k in ("nav", "toc.ncx")):
+            if _is_front_matter_item(item):
                 continue
             yield item
 
