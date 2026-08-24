@@ -49,6 +49,8 @@ class BatchQueue:
     config: JobConfig
     glossary: list[dict[str, str]] = field(default_factory=list)
     on_progress: ProgressCallback | None = None
+    # preserve | clean | simplified — passed through to EPUB export
+    conversion_mode: str = "clean"
 
     def __post_init__(self) -> None:
         self.work_root = Path(self.work_root)
@@ -310,7 +312,12 @@ class BatchQueue:
 
             if status in (JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS):
                 try:
-                    export_job_epub(self.storage, item.job_id, item.output_path)
+                    export_job_epub(
+                        self.storage,
+                        item.job_id,
+                        item.output_path,
+                        conversion_mode=self.conversion_mode or "clean",
+                    )
                     self._emit(
                         "item_exported",
                         {"item_id": item.item_id, "output": item.output_path},
