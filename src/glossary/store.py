@@ -38,6 +38,26 @@ class GlossaryStore:
             raise KeyError(f"Glossary not found: {glossary_id}")
         return Glossary.model_validate_json(path.read_text(encoding="utf-8"))
 
+    def delete(self, glossary_id: str) -> bool:
+        p = self._path(glossary_id)
+        if p.exists():
+            p.unlink()
+            return True
+        return False
+
+    def list_by_scope(self, scope: str) -> list:
+        out = []
+        for gid in self.list_ids():
+            try:
+                g = self.load(gid)
+            except Exception:
+                continue
+            gscope = getattr(g, "scope", None)
+            val = gscope.value if hasattr(gscope, "value") else (gscope or "global")
+            if val == scope:
+                out.append(g)
+        return out
+
     def list_ids(self) -> list[str]:
         return sorted(p.stem for p in self.root.glob("*.json"))
 
