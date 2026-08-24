@@ -157,5 +157,14 @@
   "scope_book": "Book",
   "label_output_dir": "Output Directory",
   "browse": "Browse",
-  "reset_output_dir": "Reset Output Directory"
+  "reset_output_dir": "Reset Output Directory",
+  "retry": "Retry",
+  "open_file_action": "Open File",
+  "open_folder_action": "Open Folder",
+  "output_path_line": "Output: {path}",
+  "export_failed_msg": "Translation completed, but EPUB export failed.",
+  "translation_failed_msg": "Translation failed.",
+  "chapters_failed_summary": "{n} chapters failed",
+  "retry_started": "Retry started (frozen job config)",
+  "output_missing": "Output file not found."
 }
