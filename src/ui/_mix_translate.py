@@ -5,11 +5,22 @@ import threading
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
+import os
+import subprocess
+import sys
+
 from src.models.job import JobStatus
 from src.queue.batch_queue import BatchQueue
 from src.utils.power import after_completion_action
 from src.ui.paths import ebook_filetypes
-from src.ui._common import _ctk, _t, log
+from src.ui._common import (
+    _SOURCE_LANG_CODES,
+    _STYLE_CODES,
+    _TARGET_LANG_CODES,
+    _ctk,
+    _t,
+    log,
+)
 
 
 class TranslateMixin:
@@ -51,6 +62,55 @@ class TranslateMixin:
         ctk.CTkButton(
             gloss_row, text=_t("refresh"), width=70, command=self._refresh_glossary_dropdowns
         ).pack(side="left", padx=4)
+
+        # Translation-task config (Source / Target / Style) — not Settings
+        cfg_row = ctk.CTkFrame(page)
+        cfg_row.pack(fill="x", pady=4, padx=4)
+
+        def _src_label(code: str) -> str:
+            return _t("src_auto") if code == "auto" else code
+
+        def _style_label(code: str) -> str:
+            return {
+                "fiction": _t("style_fiction"),
+                "nonfiction": _t("style_nonfiction"),
+            }.get(code, code)
+
+        # Seed from persisted Settings defaults; job freezes values at start
+        ts = self.settings.translation
+        src_codes = list(_SOURCE_LANG_CODES)
+        tgt_codes = list(_TARGET_LANG_CODES)
+        style_codes = list(_STYLE_CODES)
+        src_labels = [_src_label(c) for c in src_codes]
+        tgt_labels = list(tgt_codes)
+        style_labels = [_style_label(c) for c in style_codes]
+        self._tr_src_l2c = dict(zip(src_labels, src_codes))
+        self._tr_tgt_l2c = dict(zip(tgt_labels, tgt_codes))
+        self._tr_style_l2c = dict(zip(style_labels, style_codes))
+
+        ctk.CTkLabel(cfg_row, text=_t("label_source_lang")).pack(side="left", padx=4)
+        self._tr_src_var = ctk.StringVar(
+            value=_src_label(ts.source_language or "auto")
+        )
+        ctk.CTkOptionMenu(
+            cfg_row, variable=self._tr_src_var, values=src_labels, width=110
+        ).pack(side="left", padx=2)
+
+        ctk.CTkLabel(cfg_row, text=_t("label_target_lang")).pack(side="left", padx=4)
+        self._tr_tgt_var = ctk.StringVar(
+            value=ts.target_language or "zh-TW"
+        )
+        ctk.CTkOptionMenu(
+            cfg_row, variable=self._tr_tgt_var, values=tgt_labels, width=100
+        ).pack(side="left", padx=2)
+
+        ctk.CTkLabel(cfg_row, text=_t("label_style")).pack(side="left", padx=4)
+        st = (ts.style or "fiction").lower()
+        st_code = "nonfiction" if "non" in st else "fiction"
+        self._tr_style_var = ctk.StringVar(value=_style_label(st_code))
+        ctk.CTkOptionMenu(
+            cfg_row, variable=self._tr_style_var, values=style_labels, width=120
+        ).pack(side="left", padx=2)
 
         # Queue item list with lifecycle actions
         mid = ctk.CTkFrame(page)
@@ -95,50 +155,77 @@ class TranslateMixin:
         if not self._queue:
             return
         for item in self._queue.items():
-            row = ctk.CTkFrame(self.queue_list)
-            row.pack(fill="x", pady=2)
+            frame = ctk.CTkFrame(self.queue_list)
+            frame.pack(fill="x", pady=3)
             name = item.display_name or Path(item.source_path).name
             st = item.status.value if hasattr(item.status, "value") else str(item.status)
+
+            top = ctk.CTkFrame(frame)
+            top.pack(fill="x")
             ctk.CTkLabel(
-                row, text=f"{name}  [{st}]", anchor="w", width=320
+                top, text=f"{name}  [{st}]", anchor="w", width=320
             ).pack(side="left", padx=4)
-            # Status-specific actions
+
             if item.status == JobStatus.PENDING:
                 ctk.CTkButton(
-                    row, text=_t("remove"), width=70,
+                    top, text=_t("remove"), width=70,
                     command=lambda iid=item.item_id: self._queue_remove(iid),
                 ).pack(side="right", padx=2)
             elif item.status == JobStatus.PROCESSING:
                 ctk.CTkButton(
-                    row, text=_t("pause"), width=70,
+                    top, text=_t("pause"), width=70,
                     command=lambda iid=item.item_id: self._queue_pause_job(iid),
                 ).pack(side="right", padx=2)
                 ctk.CTkButton(
-                    row, text=_t("cancel"), width=70,
+                    top, text=_t("cancel"), width=70,
                     command=lambda iid=item.item_id: self._queue_cancel(iid),
                 ).pack(side="right", padx=2)
             elif item.status == JobStatus.PAUSED:
                 ctk.CTkButton(
-                    row, text=_t("resume"), width=70,
+                    top, text=_t("resume"), width=70,
                     command=lambda iid=item.item_id: self._queue_resume_job(iid),
                 ).pack(side="right", padx=2)
                 ctk.CTkButton(
-                    row, text=_t("remove"), width=70,
+                    top, text=_t("remove"), width=70,
                     command=lambda iid=item.item_id: self._queue_remove(iid),
                 ).pack(side="right", padx=2)
             elif item.status == JobStatus.COMPLETED:
+                out = (item.output_path or "").strip()
+                if out:
+                    ctk.CTkLabel(
+                        frame,
+                        text=_t("output_path_line", path=out),
+                        anchor="w",
+                    ).pack(fill="x", padx=8)
                 ctk.CTkButton(
-                    row, text=_t("remove"), width=70,
+                    top, text=_t("open_file_action"), width=80,
+                    command=lambda path=out: self._open_path(path, folder=False),
+                ).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("open_folder_action"), width=90,
+                    command=lambda path=out: self._open_path(path, folder=True),
+                ).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("remove"), width=70,
                     command=lambda iid=item.item_id: self._queue_remove(iid),
                 ).pack(side="right", padx=2)
             elif item.status == JobStatus.COMPLETED_WITH_ERRORS:
+                summary = self._user_error_summary(item)
+                if summary:
+                    ctk.CTkLabel(frame, text=summary, anchor="w").pack(
+                        fill="x", padx=8
+                    )
                 ctk.CTkButton(
-                    row, text=_t("remove"), width=70,
+                    top, text=_t("retry"), width=70,
+                    command=lambda iid=item.item_id: self._queue_retry(iid),
+                ).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("remove"), width=70,
                     command=lambda iid=item.item_id: self._queue_remove(iid),
                 ).pack(side="right", padx=2)
             elif item.status == JobStatus.CANCELLED:
                 ctk.CTkButton(
-                    row, text=_t("remove"), width=70,
+                    top, text=_t("remove"), width=70,
                     command=lambda iid=item.item_id: self._queue_remove(iid),
                 ).pack(side="right", padx=2)
 
@@ -210,6 +297,16 @@ class TranslateMixin:
                     "end",
                     _t("progress_exported", path=data.get("output")) + "\n",
                 )
+            elif event == "item_export_failed":
+                self.translate_log.insert(
+                    "end",
+                    _t("export_failed_msg") + "\n",
+                )
+            elif event == "item_error":
+                self.translate_log.insert(
+                    "end",
+                    _t("translation_failed_msg") + "\n",
+                )
             elif event == "queue_finished":
                 self.progress_label.configure(text=_t("queue_finished"))
                 out_dir = self._translate_output_dir
@@ -219,6 +316,82 @@ class TranslateMixin:
                 )
 
         self.root.after(0, ui)
+
+    def _translation_page_config(self) -> tuple[str, str, str]:
+        """Read Source / Target / Style from Translation page controls."""
+        src = "auto"
+        tgt = "zh-TW"
+        style = "fiction"
+        try:
+            lab = self._tr_src_var.get()
+            src = self._tr_src_l2c.get(lab, lab) or "auto"
+        except Exception:
+            src = getattr(self.settings.translation, "source_language", None) or "auto"
+        try:
+            lab = self._tr_tgt_var.get()
+            tgt = self._tr_tgt_l2c.get(lab, lab) or "zh-TW"
+        except Exception:
+            tgt = getattr(self.settings.translation, "target_language", None) or "zh-TW"
+        try:
+            lab = self._tr_style_var.get()
+            style = self._tr_style_l2c.get(lab, "fiction")
+        except Exception:
+            style = getattr(self.settings.translation, "style", None) or "fiction"
+        if "non" in str(style).lower():
+            style = "nonfiction"
+        else:
+            style = "fiction"
+        return src, tgt, style
+
+    def _user_error_summary(self, item) -> str:
+        """Short human-readable summary; no stack traces."""
+        err = (getattr(item, "error", None) or "") or ""
+        if err.startswith("export_failed:") or err.startswith("Export failed"):
+            return _t("export_failed_msg")
+        # Try job-level failed chapter count if available
+        try:
+            if item.job_id and self.storage:
+                job = self.storage.load_job(item.job_id)
+                failed = int(getattr(job, "failed_chunks", 0) or 0)
+                if failed > 0:
+                    return _t("chapters_failed_summary", n=failed)
+        except Exception:
+            pass
+        return _t("translation_failed_msg")
+
+    def _open_path(self, path: str, *, folder: bool = False) -> None:
+        if not path:
+            return
+        p = Path(path)
+        target = str(p.parent if folder else p)
+        if folder and not p.parent.exists():
+            return
+        if not folder and not p.exists():
+            messagebox.showinfo(_t("info"), _t("output_missing"), parent=self.root)
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(target)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", target])
+            else:
+                subprocess.Popen(["xdg-open", target])
+        except Exception as e:
+            self._show_error("error", str(e))
+
+    def _queue_retry(self, item_id: str) -> None:
+        if not self._queue:
+            return
+        try:
+            self._queue.retry_job(item_id)
+            if self._queue.status.value != "running":
+                self._queue.start()
+                threading.Thread(target=self._watch_queue, daemon=True).start()
+        except Exception as e:
+            self._show_error("error", str(e))
+            return
+        self._refresh_queue_list()
+        self.translate_log.insert("end", _t("retry_started") + "\n")
 
     def _add_translate(self) -> None:
         try:
@@ -265,6 +438,19 @@ class TranslateMixin:
             )
             return
         try:
+            # Freeze current Translation-page task config into queue for NEW jobs only.
+            # Existing jobs already hold their own JobConfig snapshot.
+            if hasattr(self, "_job_config_from_settings"):
+                self._queue.config = self._job_config_from_settings()
+            # Persist Source/Target/Style as defaults for next session seed
+            try:
+                src, tgt, style = self._translation_page_config()
+                self.settings.translation.source_language = src
+                self.settings.translation.target_language = tgt
+                self.settings.translation.style = style
+                self.settings.save(self.settings_path)
+            except Exception:
+                log.exception("persist translation page defaults")
             self._queue.glossary = self._selected_glossary_entries()
             try:
                 mode = self._current_conversion_mode()
