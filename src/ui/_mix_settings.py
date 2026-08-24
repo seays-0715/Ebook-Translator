@@ -66,6 +66,7 @@ class SettingsMixin:
             codes: tuple[str, ...],
             current: str,
             label_for,
+            on_change=None,
         ) -> None:
             labels, l2c, c2l = self._option_labels(codes, label_for)
             option_maps[key] = l2c
@@ -75,7 +76,9 @@ class SettingsMixin:
                 side="left"
             )
             initial = c2l.get(current, labels[0] if labels else "")
-            menu = ctk.CTkOptionMenu(row, values=labels, width=280)
+            menu = ctk.CTkOptionMenu(
+                row, values=labels, width=280, command=on_change
+            )
             menu.set(initial)
             menu.pack(side="left", padx=4)
             entries[key] = menu
@@ -136,12 +139,40 @@ class SettingsMixin:
             self.settings.translation.target_language,
             _tgt_label,
         )
+
+        def _resolve_style_code(label: str | None = None) -> str:
+            try:
+                cur = label
+                if cur is None:
+                    lab = entries.get("style")
+                    cur = lab.get() if lab is not None and hasattr(lab, "get") else ""
+                if _t("style_nonfiction") in str(cur) or "nonfiction" in str(cur).lower():
+                    return "nonfiction"
+            except Exception:
+                pass
+            return "fiction"
+
+        def _prompt_for_style(style_code: str) -> str:
+            """Saved custom for style, else empty (runtime uses built-in default)."""
+            if style_code == "nonfiction":
+                return self.settings.translation.nonfiction_prompt or ""
+            return self.settings.translation.fiction_prompt or ""
+
+        def _on_style_change(choice: str) -> None:
+            """When Style switches, show that style's saved prompt (or empty)."""
+            code = _resolve_style_code(choice)
+            text = _prompt_for_style(code)
+            prompt_box.delete("1.0", "end")
+            if text:
+                prompt_box.insert("1.0", text)
+
         dropdown(
             "style",
             "label_style",
             _STYLE_CODES,
             self.settings.translation.style,
             _style_label,
+            on_change=_on_style_change,
         )
         field(
             "chunk_target_tokens",
@@ -158,14 +189,11 @@ class SettingsMixin:
         )
         prompt_box = ctk.CTkTextbox(scroll, height=100)
         prompt_box.pack(fill="x", pady=2)
-        # Load style-specific saved prompt, else empty (default used at runtime)
+        # Load style-specific saved prompt (empty → runtime uses built-in default)
         _st = (self.settings.translation.style or "fiction").lower()
-        _saved = (
-            self.settings.translation.fiction_prompt
-            if _st.startswith("fiction")
-            else self.settings.translation.nonfiction_prompt
+        _initial = _prompt_for_style(
+            "nonfiction" if "non" in _st else "fiction"
         )
-        _initial = self.settings.translation.prompt or _saved or ""
         if _initial:
             prompt_box.insert("1.0", _initial)
         entries["prompt"] = prompt_box
@@ -175,16 +203,7 @@ class SettingsMixin:
 
         def _reset_prompt() -> None:
             from src.translation.prompts import default_prompt_for_style
-            style_code = "fiction"
-            # resolve current style from dropdown if available
-            try:
-                lab = entries.get("style")
-                if lab is not None:
-                    cur = lab.get() if hasattr(lab, "get") else str(lab)
-                    if _t("style_nonfiction") in str(cur) or "nonfiction" in str(cur).lower():
-                        style_code = "nonfiction"
-            except Exception:
-                pass
+            style_code = _resolve_style_code()
             prompt_box.delete("1.0", "end")
             prompt_box.insert("1.0", default_prompt_for_style(style_code))
 
