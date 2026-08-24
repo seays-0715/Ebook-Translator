@@ -139,5 +139,20 @@
   "import": "匯入…",
   "export": "匯出…",
   "edit": "編輯",
-  "reject": "拒絕"
+  "reject": "拒絕",
+  "label_conversion_mode": "轉換模式",
+  "conversion_mode_preserve": "保留原書",
+  "conversion_mode_clean": "清理／優化",
+  "conversion_mode_simplified": "完全簡化",
+  "content_preview": "內容預覽",
+  "untitled_chapter": "未命名",
+  "style_fiction": "小說",
+  "style_nonfiction": "非小說",
+  "label_global_glossary": "全域術語表",
+  "label_book_glossary": "本書術語表",
+  "glossary_none": "無",
+  "reset_to_default": "重設為預設",
+  "delete_glossary": "刪除術語表",
+  "scope_global": "全域",
+  "scope_book": "本書"
 }
