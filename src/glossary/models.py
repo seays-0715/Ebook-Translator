@@ -1,7 +1,7 @@
 """Glossary data models (spec §21–§26).
 
-Proper Noun Glossary > Terminology Glossary > Style > AI judgment.
 Matching is glossary-as-context (not pure string replace).
+V1 scopes: Global Glossary | Book Glossary (user-defined purpose).
 """
 
 from __future__ import annotations
@@ -15,6 +15,11 @@ from pydantic import BaseModel, Field
 class GlossaryType(str, Enum):
     PROPER_NOUN = "proper_noun"
     TERMINOLOGY = "terminology"
+
+
+class GlossaryScope(str, Enum):
+    GLOBAL = "global"
+    BOOK = "book"
 
 
 class GlossaryEntry(BaseModel):
@@ -34,6 +39,8 @@ class GlossaryEntry(BaseModel):
 class Glossary(BaseModel):
     glossary_id: str
     name: str
+    scope: GlossaryScope = GlossaryScope.GLOBAL
+    book_key: str | None = None
     version: str = "1"
     schema_version: int = 1
     entries: list[GlossaryEntry] = Field(default_factory=list)
@@ -45,7 +52,6 @@ class Glossary(BaseModel):
 
     def as_prompt_list(self, only_confirmed: bool = True) -> list[dict[str, str]]:
         src = self.confirmed_entries() if only_confirmed else self.entries
-        # Proper nouns first
         ordered = sorted(
             src,
             key=lambda e: (0 if e.type == GlossaryType.PROPER_NOUN else 1, e.source),
