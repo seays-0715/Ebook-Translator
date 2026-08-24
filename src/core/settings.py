@@ -22,8 +22,9 @@ class AIConnectionSettings(BaseModel):
 
 
 class TranslationSettings(BaseModel):
-    source_language: str = "auto"
-    target_language: str = "zh-TW"
+    # Explicit selection only — no Auto Detect (registry default ja)
+    source_language: str = "ja"
+    target_language: str = "zh-Hant"
     # V1 styles: fiction | nonfiction
     style: str = "fiction"
     chunk_target_tokens: int = 1000
