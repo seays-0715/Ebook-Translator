@@ -20,6 +20,7 @@ from src.translation.client import TranslationClient, TranslationError
 from src.translation.prompts import (
     DEFAULT_SYSTEM_PROMPT,
     build_user_payload,
+    render_prompt_template,
     resolve_system_prompt,
 )
 from src.translation.validator import validate_ai_response
@@ -48,10 +49,16 @@ class TranslationEngine:
         # Always from Job snapshot — never current/global glossary
         self.glossary_entries = list(job.config.glossary_entries or [])
         # Custom prompt wins; else style-specific default (fiction / nonfiction)
-        self.system_prompt = resolve_system_prompt(
+        raw_prompt = resolve_system_prompt(
             getattr(job.config, "style", None) or "fiction",
             job.config.prompt or None,
         ) or DEFAULT_SYSTEM_PROMPT
+        # Render {{source_language_name}} etc. from frozen job languages
+        self.system_prompt = render_prompt_template(
+            raw_prompt,
+            source_lang=job.config.source_language,
+            target_lang=job.config.target_language,
+        )
         self.on_progress = on_progress
         self._stop_requested = False
         self._pause_requested = False
