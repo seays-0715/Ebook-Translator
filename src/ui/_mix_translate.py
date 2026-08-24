@@ -233,14 +233,15 @@ class TranslateMixin:
             return
         if not paths:
             return
-        try:
-            out = filedialog.askdirectory(parent=self.root, title=_t("output_folder"))
-        except Exception as e:
-            self._show_error("error_open_file", str(e))
-            return
-        if not out:
-            return
-        self._translate_output_dir = Path(out)
+        # Use global Output Directory setting (default: <EXE>/output)
+        if hasattr(self, "_resolved_output_dir"):
+            self._translate_output_dir = self._resolved_output_dir()
+        else:
+            from src.ui.paths import resolve_output_dir
+
+            self._translate_output_dir = resolve_output_dir(
+                getattr(self.settings.output, "default_dir", None)
+            )
         self._ensure_queue()
         assert self._queue is not None
         for p in paths:
