@@ -14,6 +14,7 @@ from src.core.chapter_ops import (
     rename_chapter,
     split_chapter,
 )
+from src.core.languages import normalize_code
 from src.core.pipeline import parse_to_book
 from src.epub.generator import generate_epub
 from src.glossary.builder import build_candidates_from_alignment
@@ -518,8 +519,12 @@ class ConvertMixin:
         if hasattr(self, "_translation_page_config"):
             src, tgt, style = self._translation_page_config()
         else:
-            src = self.settings.translation.source_language or "auto"
-            tgt = self.settings.translation.target_language or "zh-TW"
+            src = normalize_code(
+                self.settings.translation.source_language or "ja"
+            )
+            tgt = normalize_code(
+                self.settings.translation.target_language or "zh-Hant"
+            )
             style = (self.settings.translation.style or "fiction").lower()
             style = "nonfiction" if "non" in style else "fiction"
 
@@ -537,8 +542,8 @@ class ConvertMixin:
             )
         prompt = resolve_system_prompt(style, custom or None)
         return JobConfig(
-            source_language=src,
-            target_language=tgt,
+            source_language=normalize_code(src),
+            target_language=normalize_code(tgt),
             endpoint=self.settings.ai.endpoint,
             model=self.settings.ai.model,
             model_identifier=self.settings.ai.model_identifier
