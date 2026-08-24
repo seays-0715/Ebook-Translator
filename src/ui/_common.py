@@ -36,6 +36,16 @@ def _t(key: str, **kwargs) -> str:
     return i18n.get(key, **kwargs)
 
 
+def format_chapter_list_label(order: int, title: str | None) -> str:
+    """Production chapter-list label: navigation index + title only.
+
+    Must not include body text, block counts, character counts, or other
+    content statistics. Body content belongs in the Chapter Preview pane.
+    """
+    t = (title or "").strip() or _t("untitled_chapter")
+    return _t("chapter_row_compact", n=order + 1, title=t)
+
+
 def _relaunch_process() -> None:
     if getattr(sys, "frozen", False):
         cmd = [sys.executable]
