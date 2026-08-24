@@ -45,27 +45,37 @@ def test_retry_job_rejects_wrong_status(tmp_path: Path):
 
 
 def test_chapter_list_label_is_title_only():
-    """Chapter list must not embed body snippets in the label."""
-    from src.models.blocks import BlockType, ContentBlock
-    from src.models.book import BookMetadata, CanonicalBook, Chapter, Layout
+    """Exercise production format_chapter_list_label — title/nav only.
 
+    Must fail if production reintroduces body snippets, block counts,
+    or other content statistics into the chapter-list label.
+    """
+    from src.models.blocks import BlockType, ContentBlock
+    from src.models.book import Chapter
+    from src.ui._common import format_chapter_list_label
+
+    body = (
+        "This is a long body paragraph that must not appear "
+        "in the chapter list item."
+    )
     blocks = [
-        ContentBlock(id="h0", type=BlockType.HEADING, order=0, text="Chapter One", level=1),
         ContentBlock(
-            id="p0",
-            type=BlockType.PARAGRAPH,
-            order=1,
-            text="This is a long body paragraph that must not appear in the chapter list item.",
+            id="h0", type=BlockType.HEADING, order=0, text="Chapter One", level=1
+        ),
+        ContentBlock(
+            id="p0", type=BlockType.PARAGRAPH, order=1, text=body
         ),
     ]
-    book = CanonicalBook(
-        metadata=BookMetadata(title="T", author="A", language="en"),
-        layout=Layout.HORIZONTAL,
-        chapters=[Chapter(id="c1", title="Chapter One", order=0, blocks=blocks)],
-    )
-    # Simulate list label construction used by ConvertMixin
-    ch = book.chapters[0]
-    title = ch.title or "Untitled"
-    label = f"{ch.order + 1}. {title}  ({len(ch.blocks)})"
-    assert "long body paragraph" not in label
+    ch = Chapter(id="c1", title="Chapter One", order=0, blocks=blocks)
+    n_blocks = len(ch.blocks)
+
+    label = format_chapter_list_label(ch.order, ch.title)
+
     assert "Chapter One" in label
+    assert body not in label
+    assert "long body paragraph" not in label
+    # Block count must not appear (e.g. "(2)" or "2 blocks")
+    assert f"({n_blocks})" not in label
+    assert "blocks" not in label.lower()
+    # Parentheses used only for block stats previously — none expected
+    assert "(" not in label and ")" not in label
