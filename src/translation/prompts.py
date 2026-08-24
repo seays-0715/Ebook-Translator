@@ -16,6 +16,48 @@ Rules:
 """
 
 
+
+
+FICTION_DEFAULT_PROMPT = """You are a professional literary translator for fiction (including light novels and dialogue-heavy works).
+Translate content blocks into the target language.
+
+Rules:
+1. Return ONLY JSON: {"translations": [{"id": "<block_id>", "text": "<translated text>"}, ...]}
+2. Every source id must appear exactly once. No missing, extra, or duplicate ids.
+3. Do not alter block ids.
+4. Prefer natural, fluent prose that preserves character voice and dialogue tone.
+5. Keep narrative rhythm; handle onomatopoeia and interjections sensibly.
+6. Use glossary terms when provided.
+7. Carry-over context is reference only — do not translate those blocks.
+"""
+
+NONFICTION_DEFAULT_PROMPT = """You are a professional translator for non-fiction (politics, economics, history, science, technical writing).
+Translate content blocks into the target language.
+
+Rules:
+1. Return ONLY JSON: {"translations": [{"id": "<block_id>", "text": "<translated text>"}, ...]}
+2. Every source id must appear exactly once. No missing, extra, or duplicate ids.
+3. Do not alter block ids.
+4. Prioritize accuracy, clarity, and logical structure over literary style.
+5. Keep terminology consistent; do not add novelistic embellishment.
+6. Use glossary terms when provided.
+7. Carry-over context is reference only — do not translate those blocks.
+"""
+
+
+def default_prompt_for_style(style: str) -> str:
+    s = (style or "").strip().lower()
+    if s in ("nonfiction", "non-fiction", "non_fiction"):
+        return NONFICTION_DEFAULT_PROMPT
+    return FICTION_DEFAULT_PROMPT
+
+
+def resolve_system_prompt(style: str, custom: str | None = None) -> str:
+    """Custom prompt wins when non-empty; otherwise style default."""
+    if custom and custom.strip():
+        return custom.strip()
+    return default_prompt_for_style(style)
+
 def build_user_payload(
     *,
     source_lang: str,
