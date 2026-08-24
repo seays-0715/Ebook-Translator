@@ -22,6 +22,7 @@ class GlossaryMixin:
         row.pack(fill="x", pady=4)
         for text_key, cmd in [
             ("create", self._gloss_create),
+            ("rename", self._gloss_rename),
             ("build_from_pair", self._gloss_build),
             ("import", self._gloss_import),
             ("export", self._gloss_export),
@@ -67,6 +68,37 @@ class GlossaryMixin:
             self._gloss_refresh()
         except Exception as e:
             log.exception("glossary create failed")
+            self._show_error("error", str(e))
+
+    def _gloss_rename(self) -> None:
+        gid = getattr(self, "_selected_glossary_id", None)
+        if not gid:
+            messagebox.showinfo(_t("info"), _t("select_glossary_first"), parent=self.root)
+            return
+        try:
+            g = self.glossary_store.load(gid)
+        except Exception as e:
+            self._show_error("error", str(e))
+            return
+        new_name = simpledialog.askstring(
+            _t("rename"),
+            _t("glossary_name_prompt"),
+            initialvalue=g.name,
+            parent=self.root,
+        )
+        if not new_name or not new_name.strip():
+            return
+        try:
+            g.name = new_name.strip()
+            self.glossary_store.save(g)
+            self._gloss_refresh()
+            # Keep Translate-page dropdowns in sync
+            try:
+                self._refresh_glossary_dropdowns()
+            except Exception:
+                pass
+        except Exception as e:
+            log.exception("glossary rename failed")
             self._show_error("error", str(e))
 
     def _gloss_import(self) -> None:
