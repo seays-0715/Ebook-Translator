@@ -1,4 +1,4 @@
-"""Settings page mixin — finite dropdowns + restart UX."""
+"""Settings page mixin — AI connection, chunk/retry, output, interface."""
 from __future__ import annotations
 
 from tkinter import messagebox
@@ -6,9 +6,6 @@ from tkinter import messagebox
 from src.ui._common import (
     _AFTER_CODES,
     _INTERFACE_LANG_CODES,
-    _SOURCE_LANG_CODES,
-    _STYLE_CODES,
-    _TARGET_LANG_CODES,
     _ctk,
     _relaunch_process,
     _t,
@@ -35,7 +32,7 @@ class SettingsMixin:
         ctk = _ctk()
         win = ctk.CTkToplevel(self.root)
         win.title(_t("settings"))
-        win.geometry("560x680")
+        win.geometry("560x620")
         win.transient(self.root)
 
         scroll = ctk.CTkScrollableFrame(win)
@@ -83,34 +80,6 @@ class SettingsMixin:
             menu.pack(side="left", padx=4)
             entries[key] = menu
 
-        section("settings_ai")
-        field("endpoint", "label_endpoint", self.settings.ai.endpoint)
-        field("model", "label_model", self.settings.ai.model)
-        field(
-            "model_identifier",
-            "label_model_id",
-            self.settings.ai.model_identifier or "",
-        )
-        field("api_key", "label_api_key", self.settings.ai.api_key)
-
-        section("settings_translation")
-        # Source/Target/Style are configured on the Translation page.
-        # Here: chunk size + optional system prompt defaults only.
-
-        def _src_label(code: str) -> str:
-            if code == "auto":
-                return _t("src_auto")
-            return code
-
-        def _tgt_label(code: str) -> str:
-            return code
-
-        def _style_label(code: str) -> str:
-            return {
-                "fiction": _t("style_fiction"),
-                "nonfiction": _t("style_nonfiction"),
-            }.get(code, code)
-
         def _after_label(code: str) -> str:
             return {
                 "nothing": _t("after_nothing"),
@@ -127,20 +96,20 @@ class SettingsMixin:
                 "en": _t("lang_en"),
             }.get(code, code)
 
+        # --- AI connection (single Model field) ---
+        section("settings_ai")
+        field("endpoint", "label_endpoint", self.settings.ai.endpoint)
+        # Prefer model_identifier when set; otherwise model. Saved to both.
+        _model_val = (
+            (self.settings.ai.model_identifier or "").strip()
+            or (self.settings.ai.model or "")
+            or "local"
+        )
+        field("model", "label_model", _model_val)
+        field("api_key", "label_api_key", self.settings.ai.api_key)
 
-        def _prompt_for_style(style_code: str) -> str:
-            """Saved custom for style, else built-in default (never blank)."""
-            from src.translation.prompts import default_prompt_for_style
-
-            if style_code == "nonfiction":
-                custom = self.settings.translation.nonfiction_prompt or ""
-            else:
-                custom = self.settings.translation.fiction_prompt or ""
-            if custom.strip():
-                return custom
-            return default_prompt_for_style(style_code)
-
-
+        # --- Chunk / carry-over (not Source/Target/Style/Prompt) ---
+        section("settings_translation")
         field(
             "chunk_target_tokens",
             "label_chunk_tokens",
@@ -151,33 +120,14 @@ class SettingsMixin:
             "label_carry_over",
             str(self.settings.translation.carry_over_paragraphs),
         )
-        ctk.CTkLabel(scroll, text=_t("label_prompt"), anchor="w").pack(
-            anchor="w", pady=(8, 2)
-        )
-        prompt_box = ctk.CTkTextbox(scroll, height=100)
-        prompt_box.pack(fill="x", pady=2)
-        # Load style-specific prompt: custom if set, else built-in default
-        _st = (self.settings.translation.style or "fiction").lower()
-        _initial = _prompt_for_style(
-            "nonfiction" if "non" in _st else "fiction"
-        )
-        prompt_box.insert("1.0", _initial)
-        entries["prompt"] = prompt_box
-        ctk.CTkLabel(scroll, text=_t("hint_prompt"), anchor="w").pack(
-            anchor="w", padx=4
-        )
+        ctk.CTkLabel(
+            scroll,
+            text=_t("hint_prompt_on_translate"),
+            anchor="w",
+            wraplength=480,
+        ).pack(anchor="w", padx=4, pady=(4, 2))
 
-        def _reset_prompt() -> None:
-            from src.translation.prompts import default_prompt_for_style
-            _st = (self.settings.translation.style or "fiction").lower()
-            style_code = "nonfiction" if "non" in _st else "fiction"
-            prompt_box.delete("1.0", "end")
-            prompt_box.insert("1.0", default_prompt_for_style(style_code))
-
-        ctk.CTkButton(
-            scroll, text=_t("reset_to_default"), command=_reset_prompt, width=140
-        ).pack(anchor="w", pady=4)
-
+        # --- Retry / connection resilience ---
         section("settings_retry")
         field(
             "timeout_seconds",
@@ -205,6 +155,7 @@ class SettingsMixin:
             str(self.settings.ai.endpoint_fail_threshold),
         )
 
+        # --- Output ---
         section("settings_output")
         dropdown(
             "after_completion",
@@ -214,8 +165,7 @@ class SettingsMixin:
             _after_label,
         )
 
-        # Global Output Directory (default: <EXE or project>/output)
-        from src.ui.paths import default_output_dir, resolve_output_dir
+        from src.ui.paths import default_output_dir
 
         out_row = ctk.CTkFrame(scroll)
         out_row.pack(fill="x", pady=2)
@@ -254,6 +204,7 @@ class SettingsMixin:
             scroll, text=_t("reset_output_dir"), command=_reset_output, width=140
         ).pack(anchor="w", pady=2)
 
+        # --- Interface language ---
         section("settings_interface")
         dropdown(
             "interface_language",
@@ -263,6 +214,7 @@ class SettingsMixin:
             _iface_label,
         )
 
+        # --- Advanced ---
         section("settings_advanced")
         field(
             "max_image_edge",
@@ -295,8 +247,10 @@ class SettingsMixin:
             prev_lang = self.settings.interface_language
             try:
                 self.settings.ai.endpoint = _get("endpoint")
-                self.settings.ai.model = _get("model")
-                self.settings.ai.model_identifier = _get("model_identifier")
+                model_val = _get("model") or "local"
+                # Single Model field → both slots (client uses model_identifier or model)
+                self.settings.ai.model = model_val
+                self.settings.ai.model_identifier = model_val
                 self.settings.ai.api_key = _get("api_key") or "local"
                 self.settings.ai.timeout_seconds = _get_float("timeout_seconds", 120.0)
                 self.settings.ai.retry_count = _get_int("retry_count", 3)
@@ -309,30 +263,13 @@ class SettingsMixin:
                 self.settings.ai.endpoint_fail_threshold = _get_int(
                     "endpoint_fail_threshold", 3
                 )
-                # Source/Target/Style live on Translation page (task config).
-                # Settings only persists prompt defaults + chunk params.
+                # Source/Target/Style/Prompt live on Translation page only.
                 self.settings.translation.chunk_target_tokens = _get_int(
                     "chunk_target_tokens", 1000
                 )
                 self.settings.translation.carry_over_paragraphs = _get_int(
                     "carry_over_paragraphs", 2
                 )
-                if "prompt" in entries:
-                    self.settings.translation.prompt = _get("prompt")
-                    _psave = (self.settings.translation.prompt or "").strip()
-                    _stsave = (self.settings.translation.style or "fiction").lower()
-                    from src.translation.prompts import default_prompt_for_style
-
-                    if "non" in _stsave:
-                        builtin = default_prompt_for_style("nonfiction").strip()
-                        self.settings.translation.nonfiction_prompt = (
-                            "" if _psave == builtin else _psave
-                        )
-                    else:
-                        builtin = default_prompt_for_style("fiction").strip()
-                        self.settings.translation.fiction_prompt = (
-                            "" if _psave == builtin else _psave
-                        )
                 self.settings.output.after_completion = (
                     _get("after_completion") or "nothing"
                 )
@@ -374,7 +311,6 @@ class SettingsMixin:
         def do_restart() -> None:
             dlg.destroy()
             try:
-                # Settings already saved by caller
                 _relaunch_process()
             except Exception as e:
                 log.exception("relaunch failed")
