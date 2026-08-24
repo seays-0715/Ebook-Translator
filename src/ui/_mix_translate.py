@@ -265,6 +265,12 @@ class TranslateMixin:
             return
         try:
             self._queue.glossary = self._selected_glossary_entries()
+            try:
+                mode = self._current_conversion_mode()
+                self._queue.conversion_mode = mode
+                self.settings.output.conversion_mode = mode
+            except Exception:
+                pass
             self._queue.start()
             self.translate_log.insert("end", _t("queue_started") + "\n")
             self._refresh_queue_list()
@@ -299,38 +305,46 @@ class TranslateMixin:
             threading.Thread(target=self._watch_queue, daemon=True).start()
 
     def _refresh_glossary_dropdowns(self) -> None:
-        """Populate Global / Book glossary option menus from store."""
+        """Populate both selectors with the same list of all glossaries.
+
+        Global Glossary / Book Glossary are two independent selection slots
+        only — not different glossary types or scopes. Any glossary may be
+        chosen in either slot (or None).
+        """
         none_label = _t("glossary_none")
-        global_labels = [none_label]
-        book_labels = [none_label]
+        labels = [none_label]
         self._gloss_label_to_id: dict[str, str] = {}
         try:
             store = getattr(self, "glossary_store", None) or getattr(
                 self, "_glossary_store", None
             )
             if store is not None:
-                for g in store.list_by_scope("global"):
+                for gid in store.list_ids():
+                    try:
+                        g = store.load(gid)
+                    except Exception:
+                        continue
                     label = f"{g.name} ({g.glossary_id[:8]})"
-                    global_labels.append(label)
-                    self._gloss_label_to_id[label] = g.glossary_id
-                for g in store.list_by_scope("book"):
-                    label = f"{g.name} ({g.glossary_id[:8]})"
-                    book_labels.append(label)
+                    labels.append(label)
                     self._gloss_label_to_id[label] = g.glossary_id
         except Exception:
             log.exception("refresh glossary dropdowns")
         try:
-            self._global_gloss_menu.configure(values=global_labels)
-            self._book_gloss_menu.configure(values=book_labels)
-            if self._global_gloss_var.get() not in global_labels:
+            self._global_gloss_menu.configure(values=labels)
+            self._book_gloss_menu.configure(values=labels)
+            if self._global_gloss_var.get() not in labels:
                 self._global_gloss_var.set(none_label)
-            if self._book_gloss_var.get() not in book_labels:
+            if self._book_gloss_var.get() not in labels:
                 self._book_gloss_var.set(none_label)
         except Exception:
             pass
 
     def _selected_glossary_entries(self) -> list[dict[str, str]]:
-        """Merge confirmed entries from selected global + book glossaries."""
+        """Merge confirmed entries from the two independent selector slots.
+
+        Same semantics for both slots — no Global/Book term behavior difference.
+        Duplicate sources are deduplicated (first selector wins).
+        """
         entries: list[dict[str, str]] = []
         seen: set[str] = set()
         store = getattr(self, "glossary_store", None) or getattr(
