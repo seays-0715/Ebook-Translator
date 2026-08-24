@@ -139,5 +139,20 @@
   "import": "Import…",
   "export": "Export…",
   "edit": "Edit",
-  "reject": "Reject"
+  "reject": "Reject",
+  "label_conversion_mode": "Conversion Mode",
+  "conversion_mode_preserve": "Preserve Original",
+  "conversion_mode_clean": "Clean / Optimized",
+  "conversion_mode_simplified": "Fully Simplified",
+  "content_preview": "Content Preview",
+  "untitled_chapter": "Untitled",
+  "style_fiction": "Fiction",
+  "style_nonfiction": "Non-Fiction",
+  "label_global_glossary": "Global Glossary",
+  "label_book_glossary": "Book Glossary",
+  "glossary_none": "None",
+  "reset_to_default": "Reset to Default",
+  "delete_glossary": "Delete Glossary",
+  "scope_global": "Global",
+  "scope_book": "Book"
 }
