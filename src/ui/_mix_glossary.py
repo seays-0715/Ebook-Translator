@@ -25,6 +25,7 @@ class GlossaryMixin:
             ("build_from_pair", self._gloss_build),
             ("import", self._gloss_import),
             ("export", self._gloss_export),
+            ("delete_glossary", self._gloss_delete),
             ("refresh", self._gloss_refresh),
         ]:
             ctk.CTkButton(row, text=_t(text_key), command=cmd).pack(
@@ -250,3 +251,18 @@ class GlossaryMixin:
         except Exception as e:
             log.exception("glossary refresh failed")
             self._show_error("error", str(e))
+
+    def _gloss_delete(self) -> None:
+        gid = getattr(self, "_selected_glossary_id", None)
+        if not gid:
+            messagebox.showinfo(_t("info"), _t("select_glossary_first"), parent=self.root)
+            return
+        if not messagebox.askyesno(_t("confirm"), _t("delete_glossary"), parent=self.root):
+            return
+        try:
+            self.glossary_store.delete(gid)
+        except Exception as e:
+            self._show_error("error", str(e))
+            return
+        self._selected_glossary_id = None
+        self._gloss_refresh()
