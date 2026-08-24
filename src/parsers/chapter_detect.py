@@ -1,1 +1,122 @@
-"""Chapter Detection helpers for EPUB/TXT parsers.\n\nSpine != chapter. Logical titles only. TOC is soft signal only.\n"""\n\nfrom __future__ import annotations\n\nimport re\nfrom pathlib import Path\n\nfrom bs4 import BeautifulSoup\nfrom ebooklib import epub\n\nfrom src.models.blocks import BlockType, ContentBlock\nfrom src.models.book import Chapter\n\n_TECH_NAME_RE = re.compile(\n    r\"^(?:\"\n    r\"p[-_]?\\d+|\"\n    r\"item[-_]?\\d+|\"\n    r\"sec(?:tion)?[-_]?\\d+|\"\n    r\"chap(?:ter)?[-_]?\\d+|\"\n    r\"part[-_]?\\d+|\"\n    r\"page[-_]?\\d+|\"\n    r\"xhtml?[-_]?\\d+|\"\n    r\"text[-_/]?\\d+|\"\n    r\"content[-_]?\\d+|\"\n    r\"doc(?:ument)?[-_]?\\d+|\"\n    r\"OEBPS.*|\"\n    r\"index[-_]?\\d*\"\n    r\")$\",\n    re.IGNORECASE,\n)\n\n_CHAPTER_TITLE_RE = re.compile(\n    r\"^(\"\n    r\"第\\s*[0-9０-９零一二三四五六七八九十百千两兩〇壹貳參叄肆伍陸柒捌玖拾]+\\s*[章节節回卷部篇話话]\"\n    r\"|第\\s*\\d+\\s*[章节節回卷部篇話话]\"\n    r\"|chapter\\s+\\d+\"\n    r\"|ch\\.?\\s*\\d+\"\n    r\"|part\\s+\\d+\"\n    r\"|prologue|epilogue\"\n    r\"|前言|序章|序[章言]?|後記|后记|跋|楔子|終章|终章|尾聲|尾声\"\n    r\"|幕間|幕间\"\n    r\"|追加\\s*SS|番外|特典|特別篇|特别篇\"\n    r\")\",\n    re.IGNORECASE,\n)\n\n_MAX_TITLE_LEN = 80\n\n\ndef _is_technical_filename(name: str) -> bool:\n    stem = Path(str(name)).stem.strip()\n    if not stem:\n        return True\n    if _TECH_NAME_RE.match(stem):\n        return True\n    if re.fullmatch(r\"[A-Za-z]?\\d{2,6}\", stem):\n        return True\n    if re.fullmatch(r\"[A-Za-z]{0,8}[-_]\\d{1,6}\", stem):\n        return True\n    return False\n\n\ndef _looks_like_chapter_title(text: str) -> bool:\n    t = (text or \"\").strip()\n    if not t or len(t) > _MAX_TITLE_LEN:\n        return False\n    if _is_technical_filename(t):\n        return False\n    m = _CHAPTER_TITLE_RE.match(t)\n    if not m:\n        return False\n    rest = t[m.end() :]\n    if not rest:\n        return True\n    if rest[0] in \" \\t　 :：—－–-·・|｜/／\":\n        return True\n    return False\n\n\ndef _title_from_block(block: ContentBlock) -> str | None:\n    t = (block.text or \"\").strip()\n    if not t or _is_technical_filename(t):\n        return None\n    if block.type == BlockType.HEADING:\n        level = block.level or 2\n        if level <= 1:\n            return t[:200]\n        if _looks_like_chapter_title(t) or (level == 2 and len(t) <= 40):\n            return t[:200]\n        return None\n    if block.type == BlockType.PARAGRAPH and _looks_like_chapter_title(t):\n        return t[:200]\n    return None\n\n\ndef _title_from_blocks(blocks: list[ContentBlock]) -> str | None:\n    for b in blocks:\n        title = _title_from_block(b)\n        if title:\n            return title\n    return None\n\n\ndef _guess_title(soup: BeautifulSoup, fallback: str) -> str | None:\n    for tag in (\"h1\", \"h2\", \"h3\", \"title\"):\n        el = soup.find(tag)\n        if el:\n            t = el.get_text(\" \", strip=True)\n            if t and not _is_technical_filename(t):\n                if _is_technical_filename(fallback) and t.lower() == Path(fallback).stem.lower():\n                    continue\n                return t[:200]\n    if fallback and not _is_technical_filename(fallback):\n        stem = Path(fallback).stem.strip()\n        if stem and not _is_technical_filename(stem):\n            return stem[:200]\n    return None\n\n\ndef _normalize_href(href: str | None) -> str:\n    if not href:\n        return \"\"\n    h = str(href).split(\"#\")[0].strip()\n    return Path(h).name.lower()\n\n\ndef _extract_toc_href_map(book: epub.EpubBook) -> dict[str, str]:\n    mapping: dict[str, str] = {}\n\n    def add(title: str | None, href: str | None) -> None:\n        if not title:\n            return\n        t = str(title).strip()\n        if not t or _is_technical_filename(t) or len(t) > _MAX_TITLE_LEN:\n            return\n        key = _normalize_href(href)\n        if key and key not in mapping:\n            mapping[key] = t[:200]\n\n    def walk(entry) -> None:\n        if entry is None:\n            return\n        if isinstance(entry, (list, tuple)):\n            for e in entry:\n                walk(e)\n            return\n        title = getattr(entry, \"title\", None)\n        href = getattr(entry, \"href\", None) or getattr(entry, \"file_name\", None)\n        add(title, href)\n        for child in getattr(entry, \"children\", None) or []:\n            walk(child)\n\n    try:\n        walk(getattr(book, \"toc\", None) or ())\n    except Exception:\n        pass\n\n    try:\n        for item in book.get_items():\n            name = (item.get_name() or \"\").lower()\n            props = getattr(item, \"properties\", None) or []\n            is_nav = any(k in name for k in (\"nav\", \"toc\", \"ncx\")) or \"nav\" in props\n            if not is_nav:\n                continue\n            try:\n                html = item.get_content().decode(\"utf-8\", errors=\"replace\")\n            except Exception:\n                continue\n            soup = BeautifulSoup(html, \"lxml\")\n            for a in soup.find_all(\"a\"):\n                add(a.get_text(\" \", strip=True), a.get(\"href\"))\n            for np in soup.find_all(\"navPoint\"):\n                label_el = np.find(\"navLabel\")\n                content_el = np.find(\"content\")\n                t = label_el.get_text(\" \", strip=True) if label_el else \"\"\n                href = content_el.get(\"src\") if content_el else None\n                add(t, href)\n    except Exception:\n        pass\n\n    return mapping\n\n\ndef _toc_title_for_item(item, toc_by_href: dict[str, str]) -> str | None:\n    if not toc_by_href:\n        return None\n    name = \"\"\n    if hasattr(item, \"get_name\"):\n        name = item.get_name() or \"\"\n    key = _normalize_href(name)\n    if key and key in toc_by_href:\n        return toc_by_href[key]\n    iid = getattr(item, \"id\", None)\n    if iid and str(iid).lower() in toc_by_href:\n        return toc_by_href[str(iid).lower()]\n    return None\n\n\ndef _extract_nav_labels(book: epub.EpubBook) -> list[str]:\n    labels: list[str] = []\n    try:\n        for item in book.get_items():\n            name = (item.get_name() or \"\").lower()\n            props = getattr(item, \"properties\", None) or []\n            is_nav = any(k in name for k in (\"nav\", \"toc\", \"ncx\")) or \"nav\" in props\n            if not is_nav:\n                continue\n            try:\n                html = item.get_content().decode(\"utf-8\", errors=\"replace\")\n            except Exception:\n                continue\n            soup = BeautifulSoup(html, \"lxml\")\n            for a in soup.find_all(\"a\"):\n                t = a.get_text(\" \", strip=True)\n                if t and not _is_technical_filename(t) and len(t) <= _MAX_TITLE_LEN:\n                    labels.append(t[:200])\n        toc = getattr(book, \"toc\", None) or ()\n        for entry in toc:\n            _collect_toc_labels(entry, labels)\n    except Exception:\n        pass\n    seen: set[str] = set()\n    out: list[str] = []\n    for t in labels:\n        if t not in seen:\n            seen.add(t)\n            out.append(t)\n    return out\n\n\ndef _collect_toc_labels(entry, labels: list[str]) -> None:\n    if entry is None:\n        return\n    if isinstance(entry, (list, tuple)):\n        for e in entry:\n            _collect_toc_labels(e, labels)\n        return\n    title = getattr(entry, \"title\", None)\n    if title and isinstance(title, str):\n        t = title.strip()\n        if t and not _is_technical_filename(t) and len(t) <= _MAX_TITLE_LEN:\n            labels.append(t[:200])\n    for child in getattr(entry, \"children\", None) or []:\n        _collect_toc_labels(child, labels)\n\n\ndef detect_chapters(\n    flat_blocks: list[ContentBlock],\n    *,\n    toc_labels: list[str] | None = None,\n    spine_soft_boundaries: list[tuple[int, str]] | None = None,\n) -> list[Chapter]:\n    if not flat_blocks:\n        return []\n\n    toc_list = [t.strip() for t in (toc_labels or []) if t and t.strip()]\n    toc_set = set(toc_list)\n\n    spine_title_at: dict[int, str] = {}\n    for idx, title in spine_soft_boundaries or []:\n        if 0 <= idx < len(flat_blocks) and title and not _is_technical_filename(title):\n            spine_title_at[idx] = title[:200]\n\n    boundaries: list[tuple[int, str]] = []\n\n    def _add_boundary(i: int, title: str) -> None:\n        if boundaries and boundaries[-1][1] == title and boundaries[-1][0] == i - 1:\n            return\n        if boundaries and boundaries[-1][0] == i:\n            return\n        boundaries.append((i, title))\n\n    for i, b in enumerate(flat_blocks):\n        title = _title_from_block(b)\n        if title is None and toc_set:\n            t = (b.text or \"\").strip()\n            if t and not _is_technical_filename(t):\n                if t in toc_set:\n                    title = t[:200]\n                else:\n                    for lab in toc_list:\n                        if t.startswith(lab) or lab.startswith(t):\n                            if min(len(t), len(lab)) >= 2:\n                                title = lab[:200]\n                                break\n        if title is not None:\n            _add_boundary(i, title)\n\n    if not boundaries and spine_title_at:\n        for idx in sorted(spine_title_at):\n            _add_boundary(idx, spine_title_at[idx])\n\n    if not boundaries:\n        title = _title_from_blocks(flat_blocks) or \"Untitled\"\n        if _is_technical_filename(title):\n            title = \"Untitled\"\n        if title == \"Untitled\" and toc_list:\n            for lab in toc_list:\n                if not _is_technical_filename(lab):\n                    title = lab[:200]\n                    break\n        fixed = [b.model_copy(update={\"order\": j}) for j, b in enumerate(flat_blocks)]\n        return [Chapter(id=\"ch1\", title=title, order=0, blocks=fixed)]\n\n    chapters: list[Chapter] = []\n    for bi, (start, title) in enumerate(boundaries):\n        end = boundaries[bi + 1][0] if bi + 1 < len(boundaries) else len(flat_blocks)\n        if bi == 0:\n            slice_blocks = flat_blocks[0:end]\n        else:\n            slice_blocks = flat_blocks[start:end]\n        if not slice_blocks:\n            continue\n        if _is_technical_filename(title):\n            title = _title_from_blocks(slice_blocks) or \"Untitled\"\n            if _is_technical_filename(title):\n                title = \"Untitled\"\n        fixed = [b.model_copy(update={\"order\": j}) for j, b in enumerate(slice_blocks)]\n        chapters.append(\n            Chapter(\n                id=f\"ch{len(chapters) + 1}\",\n                title=title,\n                order=len(chapters),\n                blocks=fixed,\n            )\n        )\n    return chapters\n\n\ndef _assign_chapters(\n    raw: list[tuple[str | None, list[ContentBlock]]],\n) -> list[Chapter]:\n    flat: list[ContentBlock] = []\n    for _title, blocks in raw:\n        flat.extend(blocks)\n    return detect_chapters(flat)\n
+"""Chapter Detection — public API."""
+from __future__ import annotations
+
+from src.models.blocks import ContentBlock
+from src.models.book import Chapter
+from src.parsers.chapter_detect_core import (
+    _MAX_TITLE_LEN,
+    _is_technical_filename,
+    _title_from_block,
+    _title_from_blocks,
+    _looks_like_chapter_title,
+    _guess_title,
+    _extract_toc_href_map,
+    _toc_title_for_item,
+    _extract_nav_labels,
+    _collect_toc_labels,
+    _normalize_href,
+)
+
+__all__ = [
+    "detect_chapters",
+    "_assign_chapters",
+    "_is_technical_filename",
+    "_looks_like_chapter_title",
+    "_title_from_blocks",
+    "_guess_title",
+    "_extract_toc_href_map",
+    "_toc_title_for_item",
+    "_extract_nav_labels",
+]
+
+
+def detect_chapters(
+    flat_blocks: list[ContentBlock],
+    *,
+    toc_labels: list[str] | None = None,
+    spine_soft_boundaries: list[tuple[int, str]] | None = None,
+) -> list[Chapter]:
+    if not flat_blocks:
+        return []
+
+    toc_list = [t.strip() for t in (toc_labels or []) if t and t.strip()]
+    toc_set = set(toc_list)
+
+    spine_title_at: dict[int, str] = {}
+    for idx, title in spine_soft_boundaries or []:
+        if 0 <= idx < len(flat_blocks) and title and not _is_technical_filename(title):
+            spine_title_at[idx] = title[:200]
+
+    boundaries: list[tuple[int, str]] = []
+
+    def _add_boundary(i: int, title: str) -> None:
+        if boundaries and boundaries[-1][1] == title and boundaries[-1][0] == i - 1:
+            return
+        if boundaries and boundaries[-1][0] == i:
+            return
+        boundaries.append((i, title))
+
+    for i, b in enumerate(flat_blocks):
+        title = _title_from_block(b)
+        if title is None and toc_set:
+            t = (b.text or "").strip()
+            if t and not _is_technical_filename(t):
+                if t in toc_set:
+                    title = t[:200]
+                else:
+                    for lab in toc_list:
+                        if t.startswith(lab) or lab.startswith(t):
+                            if min(len(t), len(lab)) >= 2:
+                                title = lab[:200]
+                                break
+        if title is not None:
+            _add_boundary(i, title)
+
+    if not boundaries and spine_title_at:
+        for idx in sorted(spine_title_at):
+            _add_boundary(idx, spine_title_at[idx])
+
+    if not boundaries:
+        title = _title_from_blocks(flat_blocks) or "Untitled"
+        if _is_technical_filename(title):
+            title = "Untitled"
+        if title == "Untitled" and toc_list:
+            for lab in toc_list:
+                if not _is_technical_filename(lab):
+                    title = lab[:200]
+                    break
+        fixed = [b.model_copy(update={"order": j}) for j, b in enumerate(flat_blocks)]
+        return [Chapter(id="ch1", title=title, order=0, blocks=fixed)]
+
+    chapters: list[Chapter] = []
+    for bi, (start, title) in enumerate(boundaries):
+        end = boundaries[bi + 1][0] if bi + 1 < len(boundaries) else len(flat_blocks)
+        if bi == 0:
+            slice_blocks = flat_blocks[0:end]
+        else:
+            slice_blocks = flat_blocks[start:end]
+        if not slice_blocks:
+            continue
+        if _is_technical_filename(title):
+            title = _title_from_blocks(slice_blocks) or "Untitled"
+            if _is_technical_filename(title):
+                title = "Untitled"
+        fixed = [b.model_copy(update={"order": j}) for j, b in enumerate(slice_blocks)]
+        chapters.append(
+            Chapter(
+                id=f"ch{len(chapters) + 1}",
+                title=title,
+                order=len(chapters),
+                blocks=fixed,
+            )
+        )
+    return chapters
+
+
+def _assign_chapters(
+    raw: list[tuple[str | None, list[ContentBlock]]],
+) -> list[Chapter]:
+    flat: list[ContentBlock] = []
+    for _title, blocks in raw:
+        flat.extend(blocks)
+    return detect_chapters(flat)
