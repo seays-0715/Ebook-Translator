@@ -86,7 +86,7 @@
   "label_chunk_tokens": "Chunk target tokens",
   "label_carry_over": "Carry-over paragraphs",
   "label_prompt": "System prompt (optional)",
-  "hint_prompt": "Leave empty to use the built-in default. Applied to new jobs only.",
+  "hint_prompt": "Shows built-in default when empty. Edit and Save to customize. Applied to new jobs only.",
   "label_timeout": "Timeout (seconds)",
   "label_retry_count": "Retry count",
   "label_retry_delay": "Retry delay (seconds)",
@@ -154,5 +154,8 @@
   "reset_to_default": "Reset to Default",
   "delete_glossary": "Delete Glossary",
   "scope_global": "Global",
-  "scope_book": "Book"
+  "scope_book": "Book",
+  "label_output_dir": "Output Directory",
+  "browse": "Browse",
+  "reset_output_dir": "Reset Output Directory"
 }
