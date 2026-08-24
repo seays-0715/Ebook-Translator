@@ -509,7 +509,7 @@ class ConvertMixin:
     def _job_config_from_settings(self) -> JobConfig:
         """Build JobConfig snapshot for new jobs.
 
-        Source / Target / Style come from Translation page when available
+        Source / Target / Style / Prompt come from Translation page when available
         (task config). AI connection and chunk params remain global Settings.
         Once the Job is created, this snapshot is frozen.
         """
@@ -528,18 +528,26 @@ class ConvertMixin:
             style = (self.settings.translation.style or "fiction").lower()
             style = "nonfiction" if "non" in style else "fiction"
 
-        if style == "nonfiction":
-            custom = (
-                self.settings.translation.prompt
-                or getattr(self.settings.translation, "nonfiction_prompt", "")
-                or ""
-            )
-        else:
-            custom = (
-                self.settings.translation.prompt
-                or getattr(self.settings.translation, "fiction_prompt", "")
-                or ""
-            )
+        # Prefer live Translate-page prompt textbox
+        custom = ""
+        if hasattr(self, "_read_translate_prompt"):
+            try:
+                custom = self._read_translate_prompt() or ""
+            except Exception:
+                custom = ""
+        if not custom.strip():
+            if style == "nonfiction":
+                custom = (
+                    self.settings.translation.prompt
+                    or getattr(self.settings.translation, "nonfiction_prompt", "")
+                    or ""
+                )
+            else:
+                custom = (
+                    self.settings.translation.prompt
+                    or getattr(self.settings.translation, "fiction_prompt", "")
+                    or ""
+                )
         prompt = resolve_system_prompt(style, custom or None)
         return JobConfig(
             source_language=normalize_code(src),
