@@ -20,6 +20,7 @@ def generate_epub(
     output_path: str | Path,
     *,
     assets_base: Path | None = None,
+    conversion_mode: str = "clean",
 ) -> Path:
     """Generate EPUB. Returns final path. Uses atomic write."""
     output_path = Path(output_path)
@@ -40,7 +41,7 @@ def generate_epub(
             data = cover_path.read_bytes()
             eb.set_cover(cover_path.name, data)
 
-    style = _css(book.layout)
+    style = _css(book.layout, conversion_mode=conversion_mode)
     nav_css = epub.EpubItem(
         uid="style_nav",
         file_name="style/nav.css",
@@ -143,16 +144,31 @@ def _chapter_html(chapter, image_items: dict) -> str:
     return "\n".join(parts)
 
 
-def _css(layout: Layout) -> str:
-    """Simple consistent default typography for V1 clean EPUB."""
+def _css(layout: Layout, conversion_mode: str = "clean") -> str:
+    """Typography CSS for V1 EPUB export.
+
+    Modes:
+    - preserve: looser spacing, closer to typical publisher layout
+    - clean (default): optimized reading defaults
+    - simplified: compact unified Ebook Translator layout
+    """
+    mode = (conversion_mode or "clean").strip().lower()
     direction = "vertical-rl" if layout == Layout.VERTICAL else "horizontal-tb"
+
+    if mode == "preserve":
+        line_h, body_margin, p_margin, p_indent, h1_size = "1.85", "1.5em 1.75em", "0 0 1.1em 0", "1.75em", "1.6em"
+    elif mode == "simplified":
+        line_h, body_margin, p_margin, p_indent, h1_size = "1.55", "0.9em 1.1em", "0 0 0.7em 0", "1.25em", "1.4em"
+    else:  # clean
+        line_h, body_margin, p_margin, p_indent, h1_size = "1.75", "1.25em 1.5em", "0 0 0.95em 0", "1.5em", "1.55em"
+
     return f"""
 @namespace epub "http://www.idpf.org/2007/ops";
 html {{ font-size: 100%; }}
 body {{
   font-family: "Georgia", "Times New Roman", "Songti SC", "Noto Serif CJK", serif;
-  line-height: 1.75;
-  margin: 1.25em 1.5em;
+  line-height: {line_h};
+  margin: {body_margin};
   padding: 0;
   writing-mode: {direction};
   orphans: 2;
@@ -160,7 +176,7 @@ body {{
 }}
 h1 {{
   font-weight: bold;
-  font-size: 1.55em;
+  font-size: {h1_size};
   line-height: 1.3;
   margin: 0 0 1.25em 0;
   padding-bottom: 0.4em;
@@ -179,9 +195,9 @@ h2 {{ font-size: 1.3em; }}
 h3 {{ font-size: 1.15em; }}
 h4, h5, h6 {{ font-size: 1.05em; }}
 p {{
-  margin: 0 0 0.95em 0;
-  text-indent: 1.5em;
-  line-height: 1.75;
+  margin: {p_margin};
+  text-indent: {p_indent};
+  line-height: {line_h};
   text-align: justify;
 }}
 p.caption {{
