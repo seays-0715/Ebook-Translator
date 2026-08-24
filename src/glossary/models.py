@@ -1,7 +1,8 @@
 """Glossary data models (spec §21–§26).
 
-Proper Noun Glossary > Terminology Glossary > Style > AI judgment.
 Matching is glossary-as-context (not pure string replace).
+UI may expose two independent selection slots (labeled Global / Book);
+they are not different glossary types — any glossary can fill either slot.
 """
 
 from __future__ import annotations
@@ -13,11 +14,20 @@ from pydantic import BaseModel, Field
 
 
 class GlossaryType(str, Enum):
+    """Optional entry tag for display/ordering only — does not change match semantics."""
+
     PROPER_NOUN = "proper_noun"
     TERMINOLOGY = "terminology"
 
 
 class GlossaryScope(str, Enum):
+    """Legacy optional label on a Glossary record.
+
+    UI "Global Glossary" / "Book Glossary" are two independent selection slots,
+    not two different glossary types. Any Glossary may fill either slot.
+    Scope is not used to change term behavior.
+    """
+
     GLOBAL = "global"
     BOOK = "book"
 
@@ -39,8 +49,9 @@ class GlossaryEntry(BaseModel):
 class Glossary(BaseModel):
     glossary_id: str
     name: str
+    # Optional legacy label only; not a behavioral scope
     scope: GlossaryScope = GlossaryScope.GLOBAL
-    book_key: str | None = None  # optional book identity for book-scoped glossaries
+    book_key: str | None = None
     version: str = "1"
     schema_version: int = 1
     entries: list[GlossaryEntry] = Field(default_factory=list)
@@ -52,7 +63,7 @@ class Glossary(BaseModel):
 
     def as_prompt_list(self, only_confirmed: bool = True) -> list[dict[str, str]]:
         src = self.confirmed_entries() if only_confirmed else self.entries
-        # Proper nouns first
+        # Stable order: proper_noun tag first (display preference only)
         ordered = sorted(
             src,
             key=lambda e: (0 if e.type == GlossaryType.PROPER_NOUN else 1, e.source),
