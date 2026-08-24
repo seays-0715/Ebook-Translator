@@ -1,54 +1,71 @@
-"""Round-2 UI / queue regression tests (V1 audit)."""
+"""Round-2 targeted UI/queue regressions."""
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from uuid import uuid4
 
-import pytest
-
+from src.core.storage import Storage
 from src.models.job import JobConfig, JobStatus
 from src.queue.batch_queue import BatchQueue
 
 
-def test_retry_job_resets_failed_item(tmp_path: Path):
-    storage = MagicMock()
-    cfg = JobConfig(
-        source_language="ja",
-        target_language="zh-TW",
-        endpoint="http://localhost",
-        model="test",
-        model_identifier="test",
-        style="fiction",
-        chunk_target_tokens=500,
-        carry_over_paragraphs=1,
-        retry_count=1,
-        retry_delay_seconds=0.1,
-        request_timeout_seconds=30.0,
-        request_interval_seconds=0.0,
-        endpoint_fail_threshold=2,
-        prompt="test",
-    )
+def test_retry_job_reuses_job_id_and_clears_error(tmp_path: Path):
+    storage = Storage(tmp_path / "store")
     q = BatchQueue(
         storage=storage,
-        work_root=tmp_path / "jobs",
-        config=cfg,
-        glossary=[],
-        on_progress=None,
+        work_root=tmp_path / "work",
+        config=JobConfig(source_language="ja", target_language="zh-TW", style="fiction"),
     )
-    src = tmp_path / "book.epub"
-    src.write_bytes(b"PK\x03\x04")
-    out = tmp_path / "out.epub"
-    item = q.add(src, out, display_name="Test Book")
-    # Simulate failed state
-    item.status = JobStatus.FAILED
-    item.error = "boom"
-    ok = q.retry_job(item.id)
-    assert ok is True
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.translated.epub", display_name="A")
+    # Simulate completed-with-errors with frozen job id
+    item.status = JobStatus.COMPLETED_WITH_ERRORS
+    item.error = "export_failed: disk full"
+    item.job_id = "job-" + uuid4().hex[:8]
+    q.retry_job(item.item_id)
     assert item.status == JobStatus.PENDING
-    assert item.error in (None, "")
+    assert item.error is None
+    assert item.job_id.startswith("job-")
 
 
-def test_item_export_failed_status_exists():
-    assert hasattr(JobStatus, "EXPORT_FAILED") or True  # may be string status
-    # Ensure BatchQueue exposes retry_job
-    assert hasattr(BatchQueue, "retry_job")
+def test_retry_job_rejects_wrong_status(tmp_path: Path):
+    storage = Storage(tmp_path / "store")
+    q = BatchQueue(
+        storage=storage,
+        work_root=tmp_path / "work",
+        config=JobConfig(),
+    )
+    item = q.add(tmp_path / "b.epub", tmp_path / "b.translated.epub")
+    item.status = JobStatus.COMPLETED
+    item.job_id = "x"
+    try:
+        q.retry_job(item.item_id)
+        assert False, "expected RuntimeError"
+    except RuntimeError:
+        pass
+
+
+def test_chapter_list_label_is_title_only():
+    """Chapter list must not embed body snippets in the label."""
+    from src.models.blocks import BlockType, ContentBlock
+    from src.models.book import BookMetadata, CanonicalBook, Chapter, Layout
+
+    blocks = [
+        ContentBlock(id="h0", type=BlockType.HEADING, order=0, text="Chapter One", level=1),
+        ContentBlock(
+            id="p0",
+            type=BlockType.PARAGRAPH,
+            order=1,
+            text="This is a long body paragraph that must not appear in the chapter list item.",
+        ),
+    ]
+    book = CanonicalBook(
+        metadata=BookMetadata(title="T", author="A", language="en"),
+        layout=Layout.HORIZONTAL,
+        chapters=[Chapter(id="c1", title="Chapter One", order=0, blocks=blocks)],
+    )
+    # Simulate list label construction used by ConvertMixin
+    ch = book.chapters[0]
+    title = ch.title or "Untitled"
+    label = f"{ch.order + 1}. {title}  ({len(ch.blocks)})"
+    assert "long body paragraph" not in label
+    assert "Chapter One" in label

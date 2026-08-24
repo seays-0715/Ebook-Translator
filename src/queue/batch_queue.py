@@ -7,7 +7,6 @@ Queue status and Job status are independent:
 Only one book processes at a time. On job completion (or Completed with Errors),
 auto-start next. Endpoint-level failure pauses the whole Queue.
 """
-
 from __future__ import annotations
 
 import logging
