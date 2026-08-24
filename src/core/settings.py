@@ -1,8 +1,7 @@
-"""Application settings (persisted JSON). Spec §42."""
+"""Application settings (persistent JSON under user data dir)."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -10,30 +9,33 @@ from pydantic import BaseModel, Field
 
 
 class AIConnectionSettings(BaseModel):
-    endpoint: str = "http://localhost:8000/v1"
-    model: str = "local"
-    model_identifier: str = ""
-    api_key: str = "local"
-    timeout_seconds: float = 120.0
-    retry_count: int = 3
-    retry_delay_seconds: float = 2.0
-    request_interval_seconds: float = 0.5
-    endpoint_fail_threshold: int = 3
+    api_base: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model: str = "gpt-4o-mini"
+    timeout_sec: float = 120.0
+    max_retries: int = 3
 
 
 class TranslationSettings(BaseModel):
     source_language: str = "auto"
     target_language: str = "zh-TW"
-    style: str = "natural"
+    # V1 styles: fiction | nonfiction
+    style: str = "fiction"
     chunk_target_tokens: int = 1000
     carry_over_paragraphs: int = 2
+    # Empty = use built-in default for the selected style
     prompt: str = ""
+    # Per-style saved custom prompts (persist across restarts)
+    fiction_prompt: str = ""
+    nonfiction_prompt: str = ""
 
 
 class OutputSettings(BaseModel):
     default_dir: str = ""
     same_as_input: bool = True
     after_completion: str = "nothing"  # nothing | sleep | shutdown | open_folder
+    # preserve | clean | simplified
+    conversion_mode: str = "clean"
 
 
 class AppSettings(BaseModel):

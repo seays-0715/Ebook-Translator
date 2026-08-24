@@ -19,7 +19,8 @@ log = logging.getLogger("ebook_translator.ui")
 _INTERFACE_LANG_CODES = ("", "zh-HK", "zh-TW", "en")
 _SOURCE_LANG_CODES = ("auto", "en", "ja", "zh", "zh-CN", "zh-TW", "ko", "fr", "de", "es")
 _TARGET_LANG_CODES = ("zh-TW", "zh-HK", "zh-CN", "en", "ja", "ko")
-_STYLE_CODES = ("auto", "natural", "faithful", "literary", "light_novel", "custom")
+_STYLE_CODES = ("fiction", "nonfiction")
+_CONVERSION_MODE_CODES = ("preserve", "clean", "simplified")
 _AFTER_CODES = ("nothing", "sleep", "shutdown", "open_folder")
 
 
