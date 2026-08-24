@@ -1,7 +1,19 @@
-"""Default translation prompts."""
+"""Default translation prompts with template variables."""
+
+from __future__ import annotations
+
+from src.core.languages import code_to_name, normalize_code
+
+# Template variables supported in prompts (editor shows the template):
+#   {{source_language}} / {{source_language_name}}
+#   {{target_language}} / {{target_language_name}}
+#   {{text}}  (when single-text style is used; block payload uses JSON)
+#
+# At request time the application renders these from the frozen Job config.
+# Do not hard-code language pairs inside the default prompts.
 
 DEFAULT_SYSTEM_PROMPT = """You are a professional book translator.
-Translate the given content blocks into the target language.
+Translate the given content blocks from {{source_language_name}} to {{target_language_name}}.
 
 Rules:
 1. Return ONLY a JSON object of the form:
@@ -15,11 +27,8 @@ Rules:
    do NOT translate those blocks; only translate the "to_translate" list.
 """
 
-
-
-
 FICTION_DEFAULT_PROMPT = """You are a professional literary translator for fiction (including light novels and dialogue-heavy works).
-Translate content blocks into the target language.
+Translate content blocks from {{source_language_name}} to {{target_language_name}}.
 
 Rules:
 1. Return ONLY JSON: {"translations": [{"id": "<block_id>", "text": "<translated text>"}, ...]}
@@ -32,7 +41,7 @@ Rules:
 """
 
 NONFICTION_DEFAULT_PROMPT = """You are a professional translator for non-fiction (politics, economics, history, science, technical writing).
-Translate content blocks into the target language.
+Translate content blocks from {{source_language_name}} to {{target_language_name}}.
 
 Rules:
 1. Return ONLY JSON: {"translations": [{"id": "<block_id>", "text": "<translated text>"}, ...]}
@@ -53,10 +62,36 @@ def default_prompt_for_style(style: str) -> str:
 
 
 def resolve_system_prompt(style: str, custom: str | None = None) -> str:
-    """Custom prompt wins when non-empty; otherwise style default."""
+    """Custom prompt wins when non-empty; otherwise style default (still a template)."""
     if custom and custom.strip():
         return custom.strip()
     return default_prompt_for_style(style)
+
+
+def render_prompt_template(
+    template: str,
+    *,
+    source_lang: str | None = None,
+    target_lang: str | None = None,
+    text: str | None = None,
+) -> str:
+    """Replace {{...}} variables using language registry names and optional text."""
+    src_code = normalize_code(source_lang)
+    tgt_code = normalize_code(target_lang)
+    src_name = code_to_name(src_code)
+    tgt_name = code_to_name(tgt_code)
+    out = template
+    replacements = {
+        "{{source_language}}": src_code,
+        "{{source_language_name}}": src_name,
+        "{{target_language}}": tgt_code,
+        "{{target_language_name}}": tgt_name,
+        "{{text}}": text if text is not None else "",
+    }
+    for key, val in replacements.items():
+        out = out.replace(key, val)
+    return out
+
 
 def build_user_payload(
     *,
@@ -72,6 +107,7 @@ def build_user_payload(
 
     carry_over_context pairs previous-chunk source with its translation when available
     (spec §20.1). Reference only — never included in required output IDs.
+    Language codes are stable; human-readable names belong in the system prompt.
     """
     translated_by_id = {
         item["id"]: item.get("text", "")
@@ -89,8 +125,10 @@ def build_user_payload(
         carry_over_context.append(entry)
 
     return {
-        "source_language": source_lang,
-        "target_language": target_lang,
+        "source_language": normalize_code(source_lang),
+        "target_language": normalize_code(target_lang),
+        "source_language_name": code_to_name(source_lang),
+        "target_language_name": code_to_name(target_lang),
         "style": style,
         "glossary": glossary_entries,
         "carry_over_context": carry_over_context,
