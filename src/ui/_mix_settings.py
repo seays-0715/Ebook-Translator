@@ -153,18 +153,23 @@ class SettingsMixin:
             return "fiction"
 
         def _prompt_for_style(style_code: str) -> str:
-            """Saved custom for style, else empty (runtime uses built-in default)."""
+            """Saved custom for style, else built-in default (never blank)."""
+            from src.translation.prompts import default_prompt_for_style
+
             if style_code == "nonfiction":
-                return self.settings.translation.nonfiction_prompt or ""
-            return self.settings.translation.fiction_prompt or ""
+                custom = self.settings.translation.nonfiction_prompt or ""
+            else:
+                custom = self.settings.translation.fiction_prompt or ""
+            if custom.strip():
+                return custom
+            return default_prompt_for_style(style_code)
 
         def _on_style_change(choice: str) -> None:
-            """When Style switches, show that style's saved prompt (or empty)."""
+            """When Style switches, show that style's custom or built-in default."""
             code = _resolve_style_code(choice)
             text = _prompt_for_style(code)
             prompt_box.delete("1.0", "end")
-            if text:
-                prompt_box.insert("1.0", text)
+            prompt_box.insert("1.0", text)
 
         dropdown(
             "style",
@@ -189,13 +194,12 @@ class SettingsMixin:
         )
         prompt_box = ctk.CTkTextbox(scroll, height=100)
         prompt_box.pack(fill="x", pady=2)
-        # Load style-specific saved prompt (empty → runtime uses built-in default)
+        # Load style-specific prompt: custom if set, else built-in default
         _st = (self.settings.translation.style or "fiction").lower()
         _initial = _prompt_for_style(
             "nonfiction" if "non" in _st else "fiction"
         )
-        if _initial:
-            prompt_box.insert("1.0", _initial)
+        prompt_box.insert("1.0", _initial)
         entries["prompt"] = prompt_box
         ctk.CTkLabel(scroll, text=_t("hint_prompt"), anchor="w").pack(
             anchor="w", padx=4
@@ -246,6 +250,46 @@ class SettingsMixin:
             self.settings.output.after_completion,
             _after_label,
         )
+
+        # Global Output Directory (default: <EXE or project>/output)
+        from src.ui.paths import default_output_dir, resolve_output_dir
+
+        out_row = ctk.CTkFrame(scroll)
+        out_row.pack(fill="x", pady=2)
+        ctk.CTkLabel(out_row, text=_t("label_output_dir"), width=180, anchor="w").pack(
+            side="left"
+        )
+        out_entry = ctk.CTkEntry(out_row, width=220)
+        _cur_out = (self.settings.output.default_dir or "").strip()
+        if not _cur_out:
+            _cur_out = str(default_output_dir())
+        out_entry.insert(0, _cur_out)
+        out_entry.pack(side="left", padx=4)
+        entries["output_dir"] = out_entry
+
+        def _browse_output() -> None:
+            from tkinter import filedialog
+
+            try:
+                chosen = filedialog.askdirectory(
+                    parent=win, title=_t("label_output_dir")
+                )
+            except Exception:
+                chosen = ""
+            if chosen:
+                out_entry.delete(0, "end")
+                out_entry.insert(0, chosen)
+
+        def _reset_output() -> None:
+            out_entry.delete(0, "end")
+            out_entry.insert(0, str(default_output_dir()))
+
+        ctk.CTkButton(
+            out_row, text=_t("browse"), command=_browse_output, width=70
+        ).pack(side="left", padx=2)
+        ctk.CTkButton(
+            scroll, text=_t("reset_output_dir"), command=_reset_output, width=140
+        ).pack(anchor="w", pady=2)
 
         section("settings_interface")
         dropdown(
@@ -312,17 +356,28 @@ class SettingsMixin:
                     "carry_over_paragraphs", 2
                 )
                 self.settings.translation.prompt = _get("prompt")
-                _psave = self.settings.translation.prompt or ""
+                _psave = (self.settings.translation.prompt or "").strip()
                 _stsave = (self.settings.translation.style or "fiction").lower()
+                from src.translation.prompts import default_prompt_for_style
+
                 if "non" in _stsave:
                     self.settings.translation.style = "nonfiction"
-                    self.settings.translation.nonfiction_prompt = _psave
+                    # Store empty when user kept / reset to built-in default
+                    builtin = default_prompt_for_style("nonfiction").strip()
+                    self.settings.translation.nonfiction_prompt = (
+                        "" if _psave == builtin else _psave
+                    )
                 else:
                     self.settings.translation.style = "fiction"
-                    self.settings.translation.fiction_prompt = _psave
+                    builtin = default_prompt_for_style("fiction").strip()
+                    self.settings.translation.fiction_prompt = (
+                        "" if _psave == builtin else _psave
+                    )
                 self.settings.output.after_completion = (
                     _get("after_completion") or "nothing"
                 )
+                if "output_dir" in entries:
+                    self.settings.output.default_dir = _get("output_dir")
                 self.settings.interface_language = _get("interface_language") or ""
                 self.settings.max_image_edge = _get_int("max_image_edge", 1600)
                 self.settings.save(self.settings_path)
