@@ -17,7 +17,11 @@ from src.models.chunk import Chunk, ChunkStatus
 from src.models.job import JobStatus, TranslationJob
 from src.translation.chunker import build_chunks
 from src.translation.client import TranslationClient, TranslationError
-from src.translation.prompts import DEFAULT_SYSTEM_PROMPT, build_user_payload
+from src.translation.prompts import (
+    DEFAULT_SYSTEM_PROMPT,
+    build_user_payload,
+    resolve_system_prompt,
+)
 from src.translation.validator import validate_ai_response
 from src.utils.power import SleepPreventer
 
@@ -43,7 +47,11 @@ class TranslationEngine:
         self.job = job
         # Always from Job snapshot — never current/global glossary
         self.glossary_entries = list(job.config.glossary_entries or [])
-        self.system_prompt = job.config.prompt or DEFAULT_SYSTEM_PROMPT
+        # Custom prompt wins; else style-specific default (fiction / nonfiction)
+        self.system_prompt = resolve_system_prompt(
+            getattr(job.config, "style", None) or "fiction",
+            job.config.prompt or None,
+        ) or DEFAULT_SYSTEM_PROMPT
         self.on_progress = on_progress
         self._stop_requested = False
         self._pause_requested = False
