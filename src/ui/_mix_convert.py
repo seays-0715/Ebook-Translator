@@ -50,6 +50,19 @@ class ConvertMixin:
             top, text=_t("send_to_translate"), command=self._send_preview_to_translate
         ).pack(side="left", padx=4)
 
+        mode_row = ctk.CTkFrame(page)
+        mode_row.pack(fill="x", padx=4, pady=2)
+        ctk.CTkLabel(mode_row, text=_t("label_conversion_mode")).pack(side="left", padx=4)
+        from src.ui._common import _CONVERSION_MODE_CODES
+        mode_labels = [_t(f"conversion_mode_{c}") for c in _CONVERSION_MODE_CODES]
+        self._conversion_mode_var = ctk.StringVar(
+            value=_t(f"conversion_mode_{getattr(self.settings.output, 'conversion_mode', 'clean')}")
+        )
+        self._conversion_mode_menu = ctk.CTkOptionMenu(
+            mode_row, values=mode_labels, variable=self._conversion_mode_var, width=220
+        )
+        self._conversion_mode_menu.pack(side="left", padx=4)
+
         self.drop_hint = ctk.CTkLabel(page, text=_t("drop_hint"), anchor="w")
         self.drop_hint.pack(fill="x", padx=4, pady=2)
 
@@ -187,6 +200,18 @@ class ConvertMixin:
         )
         self.info_label.configure(text=text)
 
+    def _chapter_snippet(self, ch) -> str:
+        parts = []
+        for b in ch.blocks:
+            if b.type in (BlockType.PARAGRAPH, BlockType.HEADING) and (b.text or "").strip():
+                parts.append((b.text or "").strip())
+            if len(parts) >= 2:
+                break
+        snip = " ".join(parts)
+        if len(snip) > 120:
+            snip = snip[:117] + "…"
+        return snip
+
     def _refresh_chapter_list(self) -> None:
 
         ctk = _ctk()
@@ -198,12 +223,22 @@ class ConvertMixin:
             return
         for ch in self._preview_book.chapters:
             self._chapter_ids.append(ch.id)
-            label = _t(
-                "chapter_row_compact",
-                n=ch.order + 1,
-                title=ch.title,
-                blocks=len(ch.blocks),
-            )
+            title = ch.title or _t("untitled_chapter")
+            snip = self._chapter_snippet(ch)
+            if snip:
+                label = _t(
+                    "chapter_row_compact",
+                    n=ch.order + 1,
+                    title=f"{title} — {snip}",
+                    blocks=len(ch.blocks),
+                )
+            else:
+                label = _t(
+                    "chapter_row_compact",
+                    n=ch.order + 1,
+                    title=title,
+                    blocks=len(ch.blocks),
+                )
             selected = ch.id == self._selected_chapter_id
             btn = ctk.CTkButton(
                 self.chapter_list,
@@ -333,7 +368,7 @@ class ConvertMixin:
         if not out:
             return
         try:
-            generate_epub(self._preview_book, out)
+            generate_epub(self._preview_book, out, conversion_mode=self._current_conversion_mode())
         except Exception as e:
             log.exception("generate_epub failed")
             self._show_error("error", str(e))
@@ -408,6 +443,24 @@ class ConvertMixin:
         return self._queue
 
     def _job_config_from_settings(self) -> JobConfig:
+        from src.translation.prompts import resolve_system_prompt
+
+        style = (self.settings.translation.style or "fiction").lower()
+        if "non" in style:
+            style = "nonfiction"
+            custom = (
+                self.settings.translation.prompt
+                or getattr(self.settings.translation, "nonfiction_prompt", "")
+                or ""
+            )
+        else:
+            style = "fiction"
+            custom = (
+                self.settings.translation.prompt
+                or getattr(self.settings.translation, "fiction_prompt", "")
+                or ""
+            )
+        prompt = resolve_system_prompt(style, custom or None)
         return JobConfig(
             source_language=self.settings.translation.source_language,
             target_language=self.settings.translation.target_language,
@@ -415,7 +468,7 @@ class ConvertMixin:
             model=self.settings.ai.model,
             model_identifier=self.settings.ai.model_identifier
             or self.settings.ai.model,
-            style=self.settings.translation.style,
+            style=style,
             chunk_target_tokens=self.settings.translation.chunk_target_tokens,
             carry_over_paragraphs=self.settings.translation.carry_over_paragraphs,
             retry_count=self.settings.ai.retry_count,
@@ -423,5 +476,17 @@ class ConvertMixin:
             request_timeout_seconds=self.settings.ai.timeout_seconds,
             request_interval_seconds=self.settings.ai.request_interval_seconds,
             endpoint_fail_threshold=self.settings.ai.endpoint_fail_threshold,
-            prompt=self.settings.translation.prompt or None,
+            prompt=prompt,
         )
+
+    def _current_conversion_mode(self) -> str:
+        from src.ui._common import _CONVERSION_MODE_CODES
+        label = ""
+        try:
+            label = self._conversion_mode_var.get()
+        except Exception:
+            pass
+        for code in _CONVERSION_MODE_CODES:
+            if label == _t(f"conversion_mode_{code}"):
+                return code
+        return getattr(self.settings.output, "conversion_mode", None) or "clean"
