@@ -36,8 +36,8 @@ class JobConfig(BaseModel):
     snapshot; callers must not silently replace it with current global glossary.
     """
 
-    source_language: str = "auto"
-    target_language: str = "zh-TW"
+    source_language: str = "ja"
+    target_language: str = "zh-Hant"
     model: str = "local"
     endpoint: str = "http://localhost:8000/v1"
     model_identifier: str = ""
