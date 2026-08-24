@@ -34,6 +34,24 @@ class TranslateMixin:
             side="left", padx=4
         )
 
+        gloss_row = ctk.CTkFrame(page)
+        gloss_row.pack(fill="x", pady=4, padx=4)
+        ctk.CTkLabel(gloss_row, text=_t("label_global_glossary")).pack(side="left", padx=4)
+        self._global_gloss_var = ctk.StringVar(value=_t("glossary_none"))
+        self._global_gloss_menu = ctk.CTkOptionMenu(
+            gloss_row, variable=self._global_gloss_var, values=[_t("glossary_none")], width=180
+        )
+        self._global_gloss_menu.pack(side="left", padx=4)
+        ctk.CTkLabel(gloss_row, text=_t("label_book_glossary")).pack(side="left", padx=8)
+        self._book_gloss_var = ctk.StringVar(value=_t("glossary_none"))
+        self._book_gloss_menu = ctk.CTkOptionMenu(
+            gloss_row, variable=self._book_gloss_var, values=[_t("glossary_none")], width=180
+        )
+        self._book_gloss_menu.pack(side="left", padx=4)
+        ctk.CTkButton(
+            gloss_row, text=_t("refresh"), width=70, command=self._refresh_glossary_dropdowns
+        ).pack(side="left", padx=4)
+
         # Queue item list with lifecycle actions
         mid = ctk.CTkFrame(page)
         mid.pack(fill="both", expand=False, pady=4)
@@ -62,6 +80,10 @@ class TranslateMixin:
         self.progress_bar = ctk.CTkProgressBar(prog)
         self.progress_bar.pack(fill="x", padx=0, pady=4)
         self.progress_bar.set(0)
+        try:
+            self._refresh_glossary_dropdowns()
+        except Exception:
+            pass
 
         self.translate_log = ctk.CTkTextbox(page, font=("Consolas", 13), height=120)
         self.translate_log.pack(fill="both", expand=True, pady=8)
@@ -242,6 +264,7 @@ class TranslateMixin:
             )
             return
         try:
+            self._queue.glossary = self._selected_glossary_entries()
             self._queue.start()
             self.translate_log.insert("end", _t("queue_started") + "\n")
             self._refresh_queue_list()
@@ -274,3 +297,64 @@ class TranslateMixin:
             self._queue.resume()
             self.translate_log.insert("end", _t("resume_log") + "\n")
             threading.Thread(target=self._watch_queue, daemon=True).start()
+
+    def _refresh_glossary_dropdowns(self) -> None:
+        """Populate Global / Book glossary option menus from store."""
+        none_label = _t("glossary_none")
+        global_labels = [none_label]
+        book_labels = [none_label]
+        self._gloss_label_to_id: dict[str, str] = {}
+        try:
+            store = getattr(self, "glossary_store", None) or getattr(
+                self, "_glossary_store", None
+            )
+            if store is not None:
+                for g in store.list_by_scope("global"):
+                    label = f"{g.name} ({g.glossary_id[:8]})"
+                    global_labels.append(label)
+                    self._gloss_label_to_id[label] = g.glossary_id
+                for g in store.list_by_scope("book"):
+                    label = f"{g.name} ({g.glossary_id[:8]})"
+                    book_labels.append(label)
+                    self._gloss_label_to_id[label] = g.glossary_id
+        except Exception:
+            log.exception("refresh glossary dropdowns")
+        try:
+            self._global_gloss_menu.configure(values=global_labels)
+            self._book_gloss_menu.configure(values=book_labels)
+            if self._global_gloss_var.get() not in global_labels:
+                self._global_gloss_var.set(none_label)
+            if self._book_gloss_var.get() not in book_labels:
+                self._book_gloss_var.set(none_label)
+        except Exception:
+            pass
+
+    def _selected_glossary_entries(self) -> list[dict[str, str]]:
+        """Merge confirmed entries from selected global + book glossaries."""
+        entries: list[dict[str, str]] = []
+        seen: set[str] = set()
+        store = getattr(self, "glossary_store", None) or getattr(
+            self, "_glossary_store", None
+        )
+        if store is None:
+            return entries
+        mapping = getattr(self, "_gloss_label_to_id", {}) or {}
+        for var_name in ("_global_gloss_var", "_book_gloss_var"):
+            try:
+                label = getattr(self, var_name).get()
+            except Exception:
+                continue
+            gid = mapping.get(label)
+            if not gid:
+                continue
+            try:
+                g = store.load(gid)
+                for e in g.as_prompt_list(only_confirmed=True):
+                    src = (e.get("source") or "").strip()
+                    if not src or src in seen:
+                        continue
+                    seen.add(src)
+                    entries.append(dict(e))
+            except Exception:
+                log.exception("load glossary %s for queue", gid)
+        return entries
