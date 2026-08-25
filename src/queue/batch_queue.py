@@ -1,35 +1,44 @@
-"""Batch translation queue with pause/resume and ordering."""
+"""Batch Queue — wraps Translation Job pipeline (spec §4).
+
+Queue status and Job status are independent:
+  Queue: Running | Paused | Stopped
+  Job:   Pending | Processing | Paused | Completed | Completed with Errors | Cancelled
+
+Only one book processes at a time. On job completion (or Completed with Errors),
+auto-start next. Endpoint-level failure pauses the whole Queue.
+"""
+
 from __future__ import annotations
 
 import logging
 import threading
-import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
-from src.core.pipeline import create_translation_job, run_job
+from src.core.pipeline import create_translation_job, export_job_epub
 from src.core.storage import Storage
 from src.models.job import JobConfig, JobStatus, QueueStatus
+from src.translation.engine import TranslationEngine
 
-log = logging.getLogger("ebook_translator.queue")
-
-ProgressCallback = Callable[[str, JobStatus, float, str | None], None]
+logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[str, dict], None]
 
 
 @dataclass
 class QueueItem:
     item_id: str
-    source_path: Path
+    source_path: Path | None
     output_path: Path
-    display_name: str
+    display_name: str = ""
     status: JobStatus = JobStatus.PENDING
     progress: float = 0.0
     error: str | None = None
     job_id: str | None = None
     order: int = 0
-    book_snapshot: object | None = None  # optional CanonicalBook
+    book: object | None = None  # optional CanonicalBook snapshot
 
 
 class BatchQueue:
@@ -43,6 +52,7 @@ class BatchQueue:
         *,
         on_progress: ProgressCallback | None = None,
         glossary_entries: list | None = None,
+        conversion_mode: str = "clean",
     ) -> None:
         self.storage = storage
         self.work_root = Path(work_root)
@@ -50,6 +60,7 @@ class BatchQueue:
         self.config = config
         self.on_progress = on_progress
         self.glossary_entries = glossary_entries or []
+        self.conversion_mode = conversion_mode  # clean | compact
         self._items: list[QueueItem] = []
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
@@ -68,21 +79,20 @@ class BatchQueue:
 
     def add(
         self,
-        source_path: Path,
+        source_path: Path | None,
         output_path: Path,
         *,
         display_name: str | None = None,
-        book_snapshot: object | None = None,
+        book: object | None = None,
     ) -> QueueItem:
-        source_path = Path(source_path)
-        output_path = Path(output_path)
         item = QueueItem(
             item_id=uuid4().hex[:12],
-            source_path=source_path,
-            output_path=output_path,
-            display_name=display_name or source_path.name,
+            source_path=Path(source_path) if source_path else None,
+            output_path=Path(output_path),
+            display_name=display_name
+            or (Path(source_path).name if source_path else "book"),
             order=len(self._items),
-            book_snapshot=book_snapshot,
+            book=book,
         )
         with self._lock:
             self._items.append(item)
@@ -186,7 +196,7 @@ class BatchQueue:
             try:
                 self.storage.update_job_status(item.job_id, JobStatus.PENDING)
             except Exception:
-                log.exception("retry_job storage update")
+                logger.exception("retry_job storage update")
 
     def cancel_item(self, item_id: str) -> None:
         with self._lock:
@@ -194,7 +204,11 @@ class BatchQueue:
             if not item:
                 return
             if item.status in (JobStatus.PENDING, JobStatus.PROCESSING):
-                item.status = JobStatus.PAUSED if item.status == JobStatus.PROCESSING else JobStatus.CANCELLED
+                item.status = (
+                    JobStatus.PAUSED
+                    if item.status == JobStatus.PROCESSING
+                    else JobStatus.CANCELLED
+                )
                 if item.status == JobStatus.CANCELLED:
                     item.error = "cancelled"
                 if item.job_id:
@@ -220,6 +234,8 @@ class BatchQueue:
         return None
 
     def _run_loop(self) -> None:
+        import time
+
         while True:
             with self._lock:
                 if self._stop_flag or self._status == QueueStatus.STOPPED:
@@ -227,86 +243,79 @@ class BatchQueue:
                     return
                 if self._pause_flag or self._status == QueueStatus.PAUSED:
                     self._status = QueueStatus.PAUSED
-                    # stay in loop but idle
                 item = self._next_pending()
                 if item is None:
-                    # nothing left to do
-                    if not any(
-                        i.status == JobStatus.PROCESSING for i in self._items
-                    ):
+                    if not any(i.status == JobStatus.PROCESSING for i in self._items):
                         self._status = QueueStatus.IDLE
                         return
-                    item = None
 
             if self._pause_flag:
                 time.sleep(0.2)
                 continue
-
             if item is None:
                 time.sleep(0.15)
                 continue
-
             self._process_item(item)
 
     def _process_item(self, item: QueueItem) -> None:
         with self._lock:
-            if item.status != JobStatus.PENDING:
-                return
             item.status = JobStatus.PROCESSING
-            item.progress = 0.0
-            item.error = None
 
-        def _cb(phase: str, frac: float, msg: str | None = None) -> None:
-            item.progress = max(0.0, min(1.0, frac))
-            if self.on_progress:
-                try:
-                    self.on_progress(item.item_id, item.status, item.progress, msg or phase)
-                except Exception:
-                    pass
+        if not item.job_id:
+            stem = Path(item.source_path).stem if item.source_path else "book"
+            work = self.work_root / stem / str(uuid4())[:8]
+            job = create_translation_job(
+                item.source_path if not item.book else None,
+                self.storage,
+                self.config,
+                work_dir=work,
+                book=item.book,
+                glossary_entries=self.glossary_entries,
+            )
+            item.job_id = job.job_id
+        else:
+            job = self.storage.load_job(item.job_id)
+            if job is None:
+                with self._lock:
+                    item.status = JobStatus.FAILED
+                    item.error = f"missing job {item.job_id}"
+                return
+
+        def _cb(info: dict) -> None:
+            try:
+                frac = float(info.get("progress", 0.0))
+                item.progress = max(0.0, min(1.0, frac))
+                if self.on_progress:
+                    self.on_progress(item.item_id, info)
+            except Exception:
+                logger.exception("queue progress callback error")
 
         try:
-            work_dir = self.work_root / (item.job_id or item.item_id)
-            work_dir.mkdir(parents=True, exist_ok=True)
-
-            # Create job if needed — freeze queue glossary into job config snapshot.
-            if not item.job_id:
-                cfg = self.config.model_copy(deep=True) if hasattr(self.config, "model_copy") else self.config
-                job = create_translation_job(
-                    item.source_path if item.book_snapshot is None else None,
-                    self.storage,
-                    cfg,
-                    work_dir=work_dir,
-                    book=item.book_snapshot,
-                    glossary_entries=self.glossary_entries,
-                    output_path=item.output_path,
-                )
-                item.job_id = job.job_id
-            else:
-                job = self.storage.load_job(item.job_id)
-                if job is None:
-                    raise RuntimeError(f"missing job {item.job_id}")
-
-            status = run_job(
-                job,
-                self.storage,
-                on_progress=_cb,
-                output_path=item.output_path,
-            )
+            engine = TranslationEngine(self.storage, job, on_progress=_cb)
+            status = engine.run()
             with self._lock:
                 item.status = status
-                item.progress = 1.0 if status in (
-                    JobStatus.COMPLETED,
-                    JobStatus.COMPLETED_WITH_ERRORS,
-                ) else item.progress
-                if status == JobStatus.PAUSED:
+                if status in (JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS):
+                    item.progress = 1.0
+                    try:
+                        export_job_epub(
+                            self.storage,
+                            item.job_id,
+                            item.output_path,
+                            force=(status == JobStatus.COMPLETED_WITH_ERRORS),
+                            conversion_mode=self.conversion_mode or "clean",
+                        )
+                    except Exception as ex:
+                        logger.exception("export failed")
+                        item.status = JobStatus.COMPLETED_WITH_ERRORS
+                        item.error = f"export_failed: {ex}"
+                elif status == JobStatus.PAUSED:
                     self._pause_flag = True
                     self._status = QueueStatus.PAUSED
-                if status == JobStatus.FAILED:
+                elif status == JobStatus.FAILED:
                     item.error = getattr(job, "error", None) or "failed"
-                elif status == JobStatus.COMPLETED_WITH_ERRORS:
-                    item.error = getattr(job, "error", None) or "completed_with_errors"
         except Exception as e:
-            log.exception("queue item failed: %s", item.display_name)
+            logger.exception("queue item failed: %s", item.display_name)
             with self._lock:
                 item.status = JobStatus.FAILED
                 item.error = str(e)
@@ -319,7 +328,12 @@ class BatchQueue:
             if self.on_progress:
                 try:
                     self.on_progress(
-                        item.item_id, item.status, item.progress, item.error
+                        item.item_id,
+                        {
+                            "status": str(item.status),
+                            "progress": item.progress,
+                            "error": item.error,
+                        },
                     )
                 except Exception:
-                    pass
+                    logger.exception("queue progress callback error")
