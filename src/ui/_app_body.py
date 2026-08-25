@@ -58,3 +58,51 @@ class App(ConvertMixin, TranslateMixin, GlossaryMixin, SettingsMixin):
         self._build_convert_page()
         self._build_translate_page()
         self._build_glossary_page()
+        self._enable_drag_drop()
+        self._show("convert")
+
+    def _show_error(self, title_key: str, detail: str) -> None:
+        from tkinter import messagebox
+        log.error("%s: %s", title_key, detail)
+        try:
+            messagebox.showerror(_t("error"), detail, parent=self.root)
+        except Exception:
+            messagebox.showerror("Error", detail)
+
+    def _build_nav(self) -> None:
+        ctk = _ctk()
+        nav = ctk.CTkFrame(self.root, width=180)
+        nav.pack(side="left", fill="y", padx=8, pady=8)
+        for key, label_key in [
+            ("convert", "convert"),
+            ("translate", "translate"),
+            ("glossary", "glossary"),
+        ]:
+            ctk.CTkButton(
+                nav, text=_t(label_key), command=lambda k=key: self._show(k),
+            ).pack(fill="x", pady=4, padx=8)
+        ctk.CTkButton(
+            nav, text=_t("settings"), command=self._open_settings
+        ).pack(fill="x", pady=4, padx=8, side="bottom")
+        self.content = ctk.CTkFrame(self.root)
+        self.content.pack(side="right", fill="both", expand=True, padx=8, pady=8)
+
+    def _show(self, name: str) -> None:
+        for p in self._pages.values():
+            p.pack_forget()
+        self._pages[name].pack(fill="both", expand=True)
+
+    def run(self) -> None:
+        self.root.mainloop()
+
+
+def launch() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    App().run()
+
+
+if __name__ == "__main__":
+    launch()
