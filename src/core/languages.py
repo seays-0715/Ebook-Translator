@@ -1,11 +1,12 @@
 """Centralized language registry for translation UI and jobs.
 
 Source of truth: current Hy-MT2 supported-language table
-(https://huggingface.co/unsloth/Hy-MT2-7B-GGUF — 36 entries including
+(https://huggingface.co/unsloth/Hy-MT2-7B-GGUF — 38 entries including
 Traditional Chinese and Cantonese).
 
 UI displays human-readable names; jobs/API use stable codes.
 There is no Auto Detect — the user always selects source and target.
+Unknown or empty codes raise ValueError (no silent fallback).
 """
 from __future__ import annotations
 
@@ -62,13 +63,12 @@ LANGUAGES: tuple[Language, ...] = (
 
 _BY_CODE: dict[str, Language] = {lang.code: lang for lang in LANGUAGES}
 
-# Map legacy / alternate codes used in older settings to registry codes.
+# Alternate codes → registry codes (no "auto"; unknown codes raise).
 _ALIASES: dict[str, str] = {
     "zh-TW": "zh-Hant",
     "zh-HK": "zh-Hant",
     "zh-CN": "zh",
     "zh-Hans": "zh",
-    "auto": "ja",  # no Auto Detect; fall back to Japanese as common source
 }
 
 
@@ -81,22 +81,23 @@ def all_display_names() -> list[str]:
 
 
 def normalize_code(code: str | None) -> str:
-    """Resolve aliases and validate; default to ja if unknown."""
-    c = (code or "").strip()
+    """Resolve aliases and validate. Raises ValueError if unsupported."""
+    if code is None:
+        raise ValueError("Unsupported language code: None")
+    c = code.strip()
     if not c:
-        return "ja"
+        raise ValueError("Unsupported language code: ''")
     if c in _BY_CODE:
         return c
     if c in _ALIASES:
         return _ALIASES[c]
-    # case-insensitive match
     lower = c.lower()
     for k, lang in _BY_CODE.items():
         if k.lower() == lower:
             return lang.code
     if lower in _ALIASES:
         return _ALIASES[lower]
-    return "ja"
+    raise ValueError(f"Unsupported language code: {code!r}")
 
 
 def code_to_name(code: str | None) -> str:
@@ -114,7 +115,10 @@ def name_to_code(name: str | None) -> str | None:
     for lang in LANGUAGES:
         if lang.name_en == n or lang.code == n:
             return lang.code
-    return normalize_code(n) if n in _ALIASES or n in _BY_CODE else None
+    try:
+        return normalize_code(n)
+    except ValueError:
+        return None
 
 
 def display_pairs() -> list[tuple[str, str]]:
