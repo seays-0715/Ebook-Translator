@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -21,11 +22,16 @@ class AIConnectionSettings(BaseModel):
 
 
 class TranslationSettings(BaseModel):
+    # Explicit selection only — no Auto Detect (registry default ja)
     source_language: str = "ja"
     target_language: str = "zh-Hant"
+    # V1 styles: fiction | nonfiction
     style: str = "fiction"
     chunk_target_tokens: int = 1000
     carry_over_paragraphs: int = 2
+    # Empty = use built-in default for the selected style
+    prompt: str = ""
+    # Per-style saved custom prompts (persist across restarts)
     fiction_prompt: str = ""
     nonfiction_prompt: str = ""
 
@@ -33,14 +39,16 @@ class TranslationSettings(BaseModel):
 class OutputSettings(BaseModel):
     default_dir: str = ""
     same_as_input: bool = True
-    after_completion: str = "nothing"
+    after_completion: str = "nothing"  # nothing | sleep | shutdown | open_folder
+    # standard | compact
     conversion_mode: str = "standard"
+    # Max image edge (px) for EPUB asset resize
     max_image_edge: int = 1600
 
 
 class AppSettings(BaseModel):
     schema_version: int = 1
-    interface_language: str = ""
+    interface_language: str = ""  # empty = auto-detect
     ai: AIConnectionSettings = Field(default_factory=AIConnectionSettings)
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
     output: OutputSettings = Field(default_factory=OutputSettings)
