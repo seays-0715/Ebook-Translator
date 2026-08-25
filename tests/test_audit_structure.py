@@ -87,7 +87,7 @@ def test_style_prompts_differ():
 
 
 def test_conversion_modes_differ_structurally_and_css(tmp_path: Path):
-    """Clean keeps deep headings; Compact flattens level>=3 to p.subhead.
+    """Standard keeps deep headings; Compact flattens level>=3 to p.subhead.
 
     Both retain heading text, chapter structure, and paragraph content.
     """
@@ -116,11 +116,11 @@ def test_conversion_modes_differ_structurally_and_css(tmp_path: Path):
             )
         ],
     )
-    assert _css(Layout.HORIZONTAL, "clean") != _css(Layout.HORIZONTAL, "compact")
+    assert _css(Layout.HORIZONTAL, "standard") != _css(Layout.HORIZONTAL, "compact")
 
-    out_clean = tmp_path / "clean.epub"
+    out_standard = tmp_path / "standard.epub"
     out_compact = tmp_path / "compact.epub"
-    generate_epub(book, out_clean, conversion_mode="clean")
+    generate_epub(book, out_standard, conversion_mode="standard")
     generate_epub(book, out_compact, conversion_mode="compact")
 
     def _chapter_body(path: Path) -> str:
@@ -130,15 +130,15 @@ def test_conversion_modes_differ_structurally_and_css(tmp_path: Path):
             )
             return zf.read(xhtml).decode("utf-8")
 
-    body_clean = _chapter_body(out_clean)
+    body_standard = _chapter_body(out_standard)
     body_compact = _chapter_body(out_compact)
 
-    # Clean: full meaningful heading hierarchy
-    assert "<h2>Section</h2>" in body_clean
-    assert "<h3>Deep</h3>" in body_clean
-    assert "<h4>Detail</h4>" in body_clean
-    assert "Body paragraph." in body_clean
-    assert 'class="subhead"' not in body_clean
+    # Standard: full meaningful heading hierarchy
+    assert "<h2>Section</h2>" in body_standard
+    assert "<h3>Deep</h3>" in body_standard
+    assert "<h4>Detail</h4>" in body_standard
+    assert "Body paragraph." in body_standard
+    assert 'class="subhead"' not in body_standard
 
     # Compact: level >= 3 flattened to subhead; content retained
     assert "<h2>Section</h2>" in body_compact

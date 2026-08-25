@@ -1,7 +1,7 @@
 """Regression coverage for V1 audit fixes.
 
 - Glossary: two independent selection slots, same semantics, None allowed
-- Conversion mode: clean | compact passed to generator
+- Conversion mode: standard | compact passed to generator
 - Chapter: original titles preferred over technical filenames
 - Paragraph: <p> / <br> boundaries preserved
 - Style: Fiction / Non-Fiction prompts, save/reset defaults
@@ -103,15 +103,15 @@ def test_glossary_merge_dedup_first_wins(tmp_path: Path):
 
 def test_conversion_mode_css_differs():
     layout = Layout.HORIZONTAL
-    clean = _css(layout, "clean")
+    standard = _css(layout, "standard")
     compact = _css(layout, "compact")
-    assert "line-height" in clean and "line-height" in compact
-    assert clean != compact
+    assert "line-height" in standard and "line-height" in compact
+    assert standard != compact
 
 
 def test_generate_epub_accepts_modes(tmp_path: Path):
     book = _book_with_paragraphs(["Hello.", "World."])
-    for mode in ("clean", "compact"):
+    for mode in ("standard", "compact"):
         out = tmp_path / f"out_{mode}.epub"
         generate_epub(book, out, conversion_mode=mode)
         assert out.is_file() and out.stat().st_size > 0
