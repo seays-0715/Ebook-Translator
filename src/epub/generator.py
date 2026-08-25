@@ -115,11 +115,12 @@ def generate_epub(
 
 
 def _chapter_html(chapter, image_items: dict, conversion_mode: str = "clean") -> str:
-    """Render chapter body. Mode affects structure, not only CSS.
+    """Render chapter body. Mode affects presentation hierarchy, not only CSS.
 
-    - preserve / clean: keep heading levels (1–6) as in the canonical book
-    - simplified: unified layout — chapter title is h1; deeper headings
-      become paragraph subheads so output stays predictable
+    - clean (default): keep meaningful heading levels (1–6) as in the
+      normalized canonical book
+    - compact: deeper headings (level >= 3) become paragraph subheads;
+      heading text, chapters, paragraphs, and reading order are retained
     """
     mode = (conversion_mode or "clean").strip().lower()
     parts: list[str] = []
@@ -129,8 +130,8 @@ def _chapter_html(chapter, image_items: dict, conversion_mode: str = "clean") ->
         if b.type == BlockType.HEADING:
             text = escape(b.text or "")
             level = min(max(b.level or 2, 1), 6)
-            if mode == "simplified" and level >= 3:
-                # Fully Simplified: no deep heading hierarchy
+            if mode == "compact" and level >= 3:
+                # Compact: flatten deep heading presentation to subhead
                 parts.append(f'<p class="subhead">{text}</p>')
             else:
                 parts.append(f"<h{level}>{text}</h{level}>")
@@ -160,16 +161,13 @@ def _css(layout: Layout, conversion_mode: str = "clean") -> str:
     """Typography CSS for V1 EPUB export.
 
     Modes:
-    - preserve: looser spacing, closer to typical publisher layout
-    - clean (default): optimized reading defaults
-    - simplified: compact unified Ebook Translator layout
+    - clean (default): comfortable normal reading spacing
+    - compact: tighter spacing paired with simplified visual hierarchy
     """
     mode = (conversion_mode or "clean").strip().lower()
     direction = "vertical-rl" if layout == Layout.VERTICAL else "horizontal-tb"
 
-    if mode == "preserve":
-        line_h, body_margin, p_margin, p_indent, h1_size = "1.85", "1.5em 1.75em", "0 0 1.1em 0", "1.75em", "1.6em"
-    elif mode == "simplified":
+    if mode == "compact":
         line_h, body_margin, p_margin, p_indent, h1_size = "1.55", "0.9em 1.1em", "0 0 0.7em 0", "1.25em", "1.4em"
     else:  # clean
         line_h, body_margin, p_margin, p_indent, h1_size = "1.75", "1.25em 1.5em", "0 0 0.95em 0", "1.5em", "1.55em"
