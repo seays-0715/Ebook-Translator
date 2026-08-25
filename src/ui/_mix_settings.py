@@ -91,21 +91,23 @@ class SettingsMixin:
 
         def _iface_label(code: str) -> str:
             return {
-                "": _t("lang_auto"),
                 "zh-Hant": _t("lang_zh_hant"),
                 "en": _t("lang_en"),
             }.get(code, code)
 
-        # --- AI connection (single Model field) ---
+        # --- AI connection: Backend/Provider vs Model Identifier (distinct) ---
         section("settings_ai")
         field("endpoint", "label_endpoint", self.settings.ai.endpoint)
-        # Prefer model_identifier when set; otherwise model. Saved to both.
-        _model_val = (
-            (self.settings.ai.model_identifier or "").strip()
-            or (self.settings.ai.model or "")
-            or "local"
+        field(
+            "backend",
+            "label_backend",
+            (self.settings.ai.model or "").strip() or "local",
         )
-        field("model", "label_model", _model_val)
+        field(
+            "model_identifier",
+            "label_model_identifier",
+            (self.settings.ai.model_identifier or "").strip(),
+        )
         field("api_key", "label_api_key", self.settings.ai.api_key)
 
         # --- Chunk / carry-over (not Source/Target/Style/Prompt) ---
@@ -210,7 +212,7 @@ class SettingsMixin:
             "interface_language",
             "label_interface_lang",
             _INTERFACE_LANG_CODES,
-            self.settings.interface_language or "",
+            self.settings.interface_language or "en",
             _iface_label,
         )
 
@@ -247,10 +249,8 @@ class SettingsMixin:
             prev_lang = self.settings.interface_language
             try:
                 self.settings.ai.endpoint = _get("endpoint")
-                model_val = _get("model") or "local"
-                # Single Model field → both slots (client uses model_identifier or model)
-                self.settings.ai.model = model_val
-                self.settings.ai.model_identifier = model_val
+                self.settings.ai.model = _get("backend") or "local"
+                self.settings.ai.model_identifier = _get("model_identifier")
                 self.settings.ai.api_key = _get("api_key") or "local"
                 self.settings.ai.timeout_seconds = _get_float("timeout_seconds", 120.0)
                 self.settings.ai.retry_count = _get_int("retry_count", 3)
@@ -263,7 +263,6 @@ class SettingsMixin:
                 self.settings.ai.endpoint_fail_threshold = _get_int(
                     "endpoint_fail_threshold", 3
                 )
-                # Source/Target/Style/Prompt live on Translation page only.
                 self.settings.translation.chunk_target_tokens = _get_int(
                     "chunk_target_tokens", 1000
                 )
@@ -275,7 +274,7 @@ class SettingsMixin:
                 )
                 if "output_dir" in entries:
                     self.settings.output.default_dir = _get("output_dir")
-                self.settings.interface_language = _get("interface_language") or ""
+                self.settings.interface_language = _get("interface_language") or "en"
                 self.settings.output.max_image_edge = _get_int("max_image_edge", 1600)
                 save_settings(self.settings, self.settings_path)
             except Exception as e:
