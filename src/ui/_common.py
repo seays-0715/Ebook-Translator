@@ -13,16 +13,14 @@ except ImportError:  # pragma: no cover
     ctk = None  # type: ignore
 
 from src import i18n
-from src.core.languages import all_codes, code_to_name, display_pairs, normalize_code
 
 log = logging.getLogger("ebook_translator.ui")
 
 _INTERFACE_LANG_CODES = ("", "zh-HK", "zh-TW", "en")
-# Source of truth: centralized registry (no Auto Detect)
-_SOURCE_LANG_CODES = tuple(all_codes())
-_TARGET_LANG_CODES = tuple(all_codes())
+_SOURCE_LANG_CODES = ("auto", "en", "ja", "zh", "zh-CN", "zh-TW", "ko", "fr", "de", "es")
+_TARGET_LANG_CODES = ("zh-TW", "zh-HK", "zh-CN", "en", "ja", "ko")
 _STYLE_CODES = ("fiction", "nonfiction")
-_CONVERSION_MODE_CODES = ("preserve", "clean", "simplified")
+_CONVERSION_MODE_CODES = ("clean", "compact")
 _AFTER_CODES = ("nothing", "sleep", "shutdown", "open_folder")
 
 
@@ -46,24 +44,6 @@ def format_chapter_list_label(order: int, title: str | None) -> str:
     """
     t = (title or "").strip() or _t("untitled_chapter")
     return _t("chapter_row_compact", n=order + 1, title=t)
-
-
-def language_display_labels() -> list[str]:
-    """Human-readable names for OptionMenus (same order as registry)."""
-    return [name for name, _ in display_pairs()]
-
-
-def language_label_to_code(label: str) -> str:
-    """Map UI display name (or code) back to stable code."""
-    for name, code in display_pairs():
-        if name == label or code == label:
-            return code
-    return normalize_code(label)
-
-
-def language_code_to_label(code: str | None) -> str:
-    """Map stable code to UI display name."""
-    return code_to_name(code)
 
 
 def _relaunch_process() -> None:
