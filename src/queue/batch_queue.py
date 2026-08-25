@@ -62,7 +62,6 @@ class BatchQueue:
     config: JobConfig
     glossary: list[dict[str, str]] = field(default_factory=list)
     on_progress: ProgressCallback | None = None
-    # standard | compact — passed through to EPUB export
     conversion_mode: str = "standard"
 
     def __post_init__(self) -> None:
@@ -117,25 +116,19 @@ class BatchQueue:
             return item
 
     def remove(self, item_id: str, delete_job_data: bool = False) -> None:
-        """Remove item from in-memory queue; optionally delete SQLite job data.
-
-        PROCESSING jobs cannot be removed — caller must cancel/pause first.
-        """
+        """Remove an item, deleting persistent job data first when requested."""
         with self._lock:
             item = next((i for i in self._items if i.item_id == item_id), None)
             if item is None:
                 return
             if item.status == JobStatus.PROCESSING:
-                raise QueueError(
-                    f"cannot remove job while PROCESSING: {item_id}"
-                )
-            self._items = [i for i in self._items if i.item_id != item_id]
+                raise QueueError(f"cannot remove job while PROCESSING: {item_id}")
             job_id = item.job_id if delete_job_data else None
-        if job_id:
-            try:
+
+            if job_id:
                 self.storage.delete_job(job_id)
-            except Exception:
-                logger.exception("delete_job failed for %s", job_id)
+
+            self._items = [i for i in self._items if i.item_id != item_id]
 
     def cancel_job(self, item_id: str) -> None:
         """Alias used by UI / tests."""
@@ -152,59 +145,29 @@ class BatchQueue:
             item = next((i for i in self._items if i.item_id == item_id), None)
             if item is None:
                 raise QueueError(f"unknown queue item: {item_id}")
-            if item.status == JobStatus.PENDING:
-                item.status = JobStatus.CANCELLED
+            if item.status in (JobStatus.PENDING, JobStatus.PAUSED):
                 if item.job_id:
-                    try:
-                        self.storage.update_job_status(
-                            item.job_id, JobStatus.CANCELLED
-                        )
-                    except Exception:
-                        pass
-                return
-            if item.status == JobStatus.PAUSED:
+                    self.storage.update_job_status(item.job_id, JobStatus.CANCELLED)
                 item.status = JobStatus.CANCELLED
-                if item.job_id:
-                    try:
-                        self.storage.update_job_status(
-                            item.job_id, JobStatus.CANCELLED
-                        )
-                    except Exception:
-                        pass
                 return
             if item.status == JobStatus.PROCESSING:
-                if (
-                    self._current_item_id == item_id
-                    and self._current_engine is not None
-                ):
-                    engine_to_stop = self._current_engine
-                else:
-                    # Not the active worker item — mark cancelled directly
-                    item.status = JobStatus.CANCELLED
-                    if item.job_id:
-                        try:
-                            self.storage.update_job_status(
-                                item.job_id, JobStatus.CANCELLED
-                            )
-                        except Exception:
-                            pass
-                # Final status for active PROCESSING comes from engine return
+                if self._current_item_id != item_id or self._current_engine is None:
+                    raise QueueError(
+                        f"PROCESSING job has no active TranslationEngine: {item_id}"
+                    )
+                engine_to_stop = self._current_engine
             else:
                 raise QueueError(
                     f"cannot cancel job in status {item.status}: {item_id}"
                 )
-        if engine_to_stop is not None:
-            try:
-                engine_to_stop.request_stop()
-            except Exception:
-                logger.exception("request_stop failed for %s", item_id)
+        try:
+            engine_to_stop.request_stop()
+        except Exception:
+            logger.exception("request_stop failed for %s", item_id)
+            raise
 
     def pause_job(self, item_id: str) -> None:
-        """Pause a single PROCESSING job via TranslationEngine.request_stop path.
-
-        Uses request_pause so the engine finishes the current request then
-        returns PAUSED. Final PAUSED is owned by engine.run() return value.
-        """
+        """Request pause of a PROCESSING job through its active engine."""
         engine_to_pause: TranslationEngine | None = None
         with self._lock:
             item = next((i for i in self._items if i.item_id == item_id), None)
@@ -216,53 +179,31 @@ class BatchQueue:
                 raise QueueError(
                     f"pause_job only for PROCESSING, got {item.status}: {item_id}"
                 )
-            if (
-                self._current_item_id == item_id
-                and self._current_engine is not None
-            ):
-                engine_to_pause = self._current_engine
-            else:
-                # Not actively running in this worker — mark paused
-                item.status = JobStatus.PAUSED
-                if item.job_id:
-                    try:
-                        self.storage.update_job_status(
-                            item.job_id, JobStatus.PAUSED
-                        )
-                    except Exception:
-                        pass
-        if engine_to_pause is not None:
-            try:
-                engine_to_pause.request_pause()
-            except Exception:
-                logger.exception("request_pause failed for %s", item_id)
+            if self._current_item_id != item_id or self._current_engine is None:
+                raise QueueError(
+                    f"PROCESSING job has no active TranslationEngine: {item_id}"
+                )
+            engine_to_pause = self._current_engine
+        try:
+            engine_to_pause.request_pause()
+        except Exception:
+            logger.exception("request_pause failed for %s", item_id)
+            raise
 
     def resume_job(self, item_id: str) -> None:
-        """Resume a single PAUSED job back to PENDING (worker will PROCESS).
-
-        CANCELLED may also be re-queued to PENDING for user convenience.
-        """
+        """Resume only a PAUSED job back to PENDING."""
         with self._lock:
-            for i in self._items:
-                if i.item_id != item_id:
-                    continue
-                if i.status in (JobStatus.PAUSED, JobStatus.CANCELLED):
-                    i.status = JobStatus.PENDING
-                    i.error = None
-                    if i.job_id:
-                        try:
-                            self.storage.update_job_status(
-                                i.job_id, JobStatus.PENDING
-                            )
-                        except Exception:
-                            pass
-                else:
-                    raise QueueError(
-                        f"resume_job only for PAUSED/CANCELLED, got {i.status}"
-                    )
-                break
-            else:
+            item = next((i for i in self._items if i.item_id == item_id), None)
+            if item is None:
                 raise QueueError(f"unknown queue item: {item_id}")
+            if item.status != JobStatus.PAUSED:
+                raise QueueError(
+                    f"resume_job only for PAUSED, got {item.status}: {item_id}"
+                )
+            if item.job_id:
+                self.storage.update_job_status(item.job_id, JobStatus.PENDING)
+            item.status = JobStatus.PENDING
+            item.error = None
 
     def retry_job(self, item_id: str) -> None:
         """Re-queue a completed_with_errors job using the same frozen job_id."""
@@ -276,12 +217,9 @@ class BatchQueue:
                 )
             if not item.job_id:
                 raise QueueError("retry_job requires an existing job_id")
+            self.storage.update_job_status(item.job_id, JobStatus.PENDING)
             item.status = JobStatus.PENDING
             item.error = None
-            try:
-                self.storage.update_job_status(item.job_id, JobStatus.PENDING)
-            except Exception:
-                logger.exception("retry_job storage update")
 
     def start(self) -> None:
         with self._lock:
@@ -302,10 +240,7 @@ class BatchQueue:
             self._pause_flag = True
             self._status = QueueStatus.PAUSED
             if self._current_engine is not None:
-                try:
-                    self._current_engine.request_pause()
-                except Exception:
-                    pass
+                self._current_engine.request_pause()
 
     def resume(self) -> None:
         with self._lock:
@@ -321,17 +256,10 @@ class BatchQueue:
             self._pause_flag = False
             self._status = QueueStatus.STOPPED
             if self._current_engine is not None:
-                try:
-                    self._current_engine.request_stop()
-                except Exception:
-                    pass
+                self._current_engine.request_stop()
 
     def _next_pending(self) -> QueueItem | None:
-        """Pick the next job eligible for automatic processing.
-
-        Only PENDING items are selected. PAUSED jobs require an explicit
-        resume_job() (user-initiated pause is not auto-resumed).
-        """
+        """Pick the next job eligible for automatic processing."""
         for i in self._items:
             if i.status == JobStatus.PENDING:
                 return i
@@ -362,7 +290,6 @@ class BatchQueue:
 
     def _process_item(self, item: QueueItem) -> None:
         with self._lock:
-            # May have been cancelled while waiting
             if item.status != JobStatus.PENDING:
                 return
             item.status = JobStatus.PROCESSING
@@ -396,7 +323,6 @@ class BatchQueue:
             engine = TranslationEngine(self.storage, job, on_progress=_cb)
             with self._lock:
                 self._current_engine = engine
-            # Engine return is the single owner of final PROCESSING → * transition
             status = engine.run()
             with self._lock:
                 self._current_engine = None
@@ -418,7 +344,6 @@ class BatchQueue:
                 elif status == JobStatus.PAUSED:
                     self._pause_flag = True
                     self._status = QueueStatus.PAUSED
-                # CANCELLED: leave as CANCELLED (from request_stop)
         except Exception as e:
             logger.exception("queue item failed: %s", item.display_name)
             with self._lock:
@@ -427,9 +352,6 @@ class BatchQueue:
                 self._current_engine = None
                 self._current_item_id = None
             if item.job_id:
-                try:
-                    self.storage.update_job_status(
-                        item.job_id, JobStatus.COMPLETED_WITH_ERRORS
-                    )
-                except Exception:
-                    pass
+                self.storage.update_job_status(
+                    item.job_id, JobStatus.COMPLETED_WITH_ERRORS
+                )
