@@ -91,8 +91,7 @@ class SettingsMixin:
         def _iface_label(code: str) -> str:
             return {
                 "": _t("lang_auto"),
-                "zh-HK": _t("lang_zh_hk"),
-                "zh-TW": _t("lang_zh_tw"),
+                "zh-Hant": _t("lang_zh_hant"),
                 "en": _t("lang_en"),
             }.get(code, code)
 
