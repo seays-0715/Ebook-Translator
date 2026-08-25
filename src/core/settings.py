@@ -46,7 +46,8 @@ class OutputSettings(BaseModel):
 
 class AppSettings(BaseModel):
     schema_version: int = 1
-    interface_language: str = ""  # empty = auto-detect
+    # Exactly two UI locales: "en" | "zh-Hant" (no system-default option)
+    interface_language: str = "en"
     ai: AIConnectionSettings = Field(default_factory=AIConnectionSettings)
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
     output: OutputSettings = Field(default_factory=OutputSettings)
