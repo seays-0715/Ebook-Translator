@@ -17,10 +17,8 @@ from src.core.languages import all_display_names, display_pairs, name_to_code
 
 log = logging.getLogger("ebook_translator.ui")
 
-_INTERFACE_LANG_CODES = ("", "zh-Hant", "en")
-# Legacy convert-page code lists (registry codes preferred via language helpers)
-_SOURCE_LANG_CODES = ("en", "ja", "zh", "zh-Hant", "ko", "fr", "de", "es")
-_TARGET_LANG_CODES = ("zh-Hant", "zh", "en", "ja", "ko")
+# UI interface language: exactly two options (no System default).
+_INTERFACE_LANG_CODES = ("en", "zh-Hant")
 _STYLE_CODES = ("fiction", "nonfiction")
 _CONVERSION_MODE_CODES = ("standard", "compact")
 _AFTER_CODES = ("nothing", "sleep", "shutdown", "open_folder")
