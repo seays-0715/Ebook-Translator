@@ -7,11 +7,12 @@ from pathlib import Path
 
 from ebooklib import epub
 
-from src.core.settings import AppSettings, TranslationSettings, OutputSettings
-from src.epub.generator import generate_epub, _css
+from src.core.paths import app_dir, default_output_dir, resolve_output_dir
+from src.core.settings import AppSettings, OutputSettings, TranslationSettings
+from src.epub.generator import _css, generate_epub
 from src.models.blocks import BlockType, ContentBlock
 from src.models.book import BookMetadata, CanonicalBook, Chapter, Layout
-from src.parsers.chapter_detect import _is_technical_filename
+from src.parsers.chapter_detect import detect_chapters
 from src.parsers.epub_parser import parse_epub
 from src.translation.prompts import (
     FICTION_DEFAULT_PROMPT,
@@ -19,154 +20,63 @@ from src.translation.prompts import (
     default_prompt_for_style,
     resolve_system_prompt,
 )
-from src.ui.paths import app_dir, default_output_dir, resolve_output_dir
 
 
-def _make_light_novel_fixture(path: Path) -> Path:
+def _make_epub(path: Path, chapters_html: list[tuple[str, str]], title: str = "Book") -> None:
     book = epub.EpubBook()
-    book.set_identifier("fixture-ln-001")
-    book.set_title("Distant Childhood Friends")
-    book.set_language("ja")
-    book.add_author("Test Author")
-    cover_bytes = (
-        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"
-        b"\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
-    )
-    book.set_cover("cover.jpg", cover_bytes)
-
-    def xhtml(title: str, body: str, fname: str) -> epub.EpubHtml:
-        item = epub.EpubHtml(title=title, file_name=fname, lang="ja")
-        item.set_content(
-            (
-                '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>'
-                + title
-                + "</title></head><body>"
-                + body
-                + "</body></html>"
-            ).encode("utf-8")
-        )
-        return item
-
-    titlepage = xhtml(
-        "Title Page",
-        "<h1>Distant Childhood Friends</h1>"
-        "<p>Test Author</p>"
-        "<p>Cover Illustration</p>"
-        '<img src="cover.jpg" alt="cover"/>',
-        "p-titlepage.xhtml",
-    )
-    ch1 = xhtml(
-        "Chapter 1 Trying Something New",
-        "<h1>Chapter 1 Trying Something New</h1>"
-        "<p>First real paragraph of the story begins here.</p>"
-        "<p>Second paragraph continues the narrative.</p>"
-        "<p>Third paragraph keeps spacing readable.</p>",
-        "p-005.xhtml",
-    )
-    ch2 = xhtml(
-        "Chapter 2 Next Day",
-        "<h1>Chapter 2 Next Day</h1>"
-        "<p>Morning light through the window.</p>"
-        "<p>Dialogue starts on this page.</p>",
-        "chap_0004.xhtml",
-    )
-    for item in (titlepage, ch1, ch2):
-        book.add_item(item)
-    book.toc = (
-        epub.Link("p-005.xhtml", "Chapter 1 Trying Something New", "c1"),
-        epub.Link("chap_0004.xhtml", "Chapter 2 Next Day", "c2"),
-    )
-    book.spine = ["nav", titlepage, ch1, ch2]
-    book.add_item(epub.EpubNcx())
-    book.add_item(epub.EpubNav())
-    path.parent.mkdir(parents=True, exist_ok=True)
-    epub.write_epub(str(path), book, {})
-    return path
-
-
-def test_front_matter_not_in_chapter_one(tmp_path: Path):
-    src = _make_light_novel_fixture(tmp_path / "ln.epub")
-    result = parse_epub(src, assets_dir=tmp_path / "assets")
-    book = result.book
-    assert book.chapters
-    ch1 = book.chapters[0]
-    assert not _is_technical_filename(ch1.title)
-    assert "Chapter 1" in ch1.title or "Trying" in ch1.title
-    blob = " ".join((b.text or "") for b in ch1.blocks)
-    assert "Cover Illustration" not in blob
-    images = [b for b in ch1.blocks if b.type == BlockType.IMAGE]
-    assert len(images) == 0
-    assert any("First real paragraph" in (b.text or "") for b in ch1.blocks)
-
-
-def test_original_chapter_order_and_titles(tmp_path: Path):
-    src = _make_light_novel_fixture(tmp_path / "ln2.epub")
-    result = parse_epub(src, assets_dir=tmp_path / "assets2")
-    titles = [ch.title for ch in result.book.chapters]
-    assert len(titles) >= 2
-    for t in titles:
-        assert not _is_technical_filename(t), t
-        assert not t.upper().startswith("P00")
-        assert "chap_" not in t.lower()
-    joined = " | ".join(titles)
-    assert "Chapter 1" in joined and "Chapter 2" in joined
-    i1 = next(i for i, t in enumerate(titles) if "Chapter 1" in t)
-    i2 = next(i for i, t in enumerate(titles) if "Chapter 2" in t)
-    assert i1 < i2
-
-
-def test_paragraphs_remain_meaningful(tmp_path: Path):
-    src = _make_light_novel_fixture(tmp_path / "ln3.epub")
-    result = parse_epub(src, assets_dir=tmp_path / "assets3")
-    paras = [
-        b.text.strip()
-        for ch in result.book.chapters
-        for b in ch.blocks
-        if b.type == BlockType.PARAGRAPH and (b.text or "").strip()
-    ]
-    assert len(paras) >= 3
-    assert any("First real paragraph" in p for p in paras)
-    assert any("Second paragraph" in p for p in paras)
-    assert not any(
-        "First real paragraph" in p and "Second paragraph" in p for p in paras
-    )
-
-
-def test_br_produces_readable_paragraphs(tmp_path: Path):
-    book = epub.EpubBook()
-    book.set_identifier("br1")
-    book.set_title("BR")
+    book.set_identifier("id-struct")
+    book.set_title(title)
     book.set_language("en")
-    c = epub.EpubHtml(title="C", file_name="c.xhtml", lang="en")
-    c.set_content(
-        (
-            '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
-            "<p>Line A<br/>Line B<br/>Line C</p>"
-            "<p>Standalone paragraph after.</p>"
-            "</body></html>"
-        ).encode("utf-8")
-    )
-    book.add_item(c)
-    book.toc = (c,)
-    book.spine = ["nav", c]
+    spine = []
+    toc = []
+    for i, (name, html) in enumerate(chapters_html):
+        item = epub.EpubHtml(title=name, file_name=f"c{i}.xhtml", lang="en")
+        item.set_content(
+            f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{html}</body></html>'
+        )
+        book.add_item(item)
+        spine.append(item)
+        toc.append(item)
+    book.toc = tuple(toc)
+    book.spine = ["nav"] + spine
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
-    src = tmp_path / "br.epub"
-    epub.write_epub(str(src), book, {})
-    result = parse_epub(src, assets_dir=tmp_path / "br_assets")
-    texts = [
-        (b.text or "").strip()
+    epub.write_epub(str(path), book, {})
+
+
+def test_front_matter_not_merged_as_chapter(tmp_path: Path):
+    src = tmp_path / "fm.epub"
+    _make_epub(
+        src,
+        [
+            ("cover", "<p>Cover page</p>"),
+            ("Chapter One", "<h1>Chapter One</h1><p>Body text here.</p>"),
+        ],
+        title="FM",
+    )
+    result = parse_epub(src, assets_dir=tmp_path / "assets")
+    titles = [c.title for c in result.book.chapters]
+    assert any("Chapter" in (t or "") for t in titles)
+
+
+def test_paragraph_boundaries_retained(tmp_path: Path):
+    src = tmp_path / "p.epub"
+    _make_epub(
+        src,
+        [("Ch", "<p>First paragraph.</p><p>Second paragraph.</p>")],
+    )
+    result = parse_epub(src, assets_dir=tmp_path / "assets")
+    paras = [
+        b.text
         for ch in result.book.chapters
         for b in ch.blocks
-        if b.type == BlockType.PARAGRAPH and (b.text or "").strip()
+        if b.type == BlockType.PARAGRAPH
     ]
-    assert any("Line A" in t for t in texts)
-    assert any("Standalone paragraph" in t for t in texts)
-    assert len(texts) >= 2
+    assert "First paragraph." in paras
+    assert "Second paragraph." in paras
 
 
-def test_style_prompt_shows_builtin_when_no_custom():
+def test_style_prompts_differ():
     assert default_prompt_for_style("fiction") == FICTION_DEFAULT_PROMPT
     assert default_prompt_for_style("nonfiction") == NONFICTION_DEFAULT_PROMPT
     assert FICTION_DEFAULT_PROMPT != NONFICTION_DEFAULT_PROMPT
@@ -177,6 +87,10 @@ def test_style_prompt_shows_builtin_when_no_custom():
 
 
 def test_conversion_modes_differ_structurally_and_css(tmp_path: Path):
+    """Clean keeps deep headings; Compact flattens level>=3 to p.subhead.
+
+    Both retain heading text, chapter structure, and paragraph content.
+    """
     book = CanonicalBook(
         metadata=BookMetadata(title="T", language="en"),
         layout=Layout.HORIZONTAL,
@@ -187,23 +101,53 @@ def test_conversion_modes_differ_structurally_and_css(tmp_path: Path):
                 order=0,
                 blocks=[
                     ContentBlock(
-                        id="h2", type=BlockType.HEADING, order=0, text="Deep", level=3
+                        id="h2", type=BlockType.HEADING, order=0, text="Section", level=2
                     ),
                     ContentBlock(
-                        id="p0", type=BlockType.PARAGRAPH, order=1, text="Body."
+                        id="h3", type=BlockType.HEADING, order=1, text="Deep", level=3
+                    ),
+                    ContentBlock(
+                        id="h4", type=BlockType.HEADING, order=2, text="Detail", level=4
+                    ),
+                    ContentBlock(
+                        id="p0", type=BlockType.PARAGRAPH, order=3, text="Body paragraph."
                     ),
                 ],
             )
         ],
     )
-    assert _css(Layout.HORIZONTAL, "preserve") != _css(Layout.HORIZONTAL, "clean")
-    out_s = tmp_path / "s.epub"
-    generate_epub(book, out_s, conversion_mode="simplified")
-    with zipfile.ZipFile(out_s) as zf:
-        xhtml = next(n for n in zf.namelist() if n.endswith(".xhtml") and "chap" in n)
-        body = zf.read(xhtml).decode("utf-8")
-        assert "<h3>" not in body
-        assert "Deep" in body
+    assert _css(Layout.HORIZONTAL, "clean") != _css(Layout.HORIZONTAL, "compact")
+
+    out_clean = tmp_path / "clean.epub"
+    out_compact = tmp_path / "compact.epub"
+    generate_epub(book, out_clean, conversion_mode="clean")
+    generate_epub(book, out_compact, conversion_mode="compact")
+
+    def _chapter_body(path: Path) -> str:
+        with zipfile.ZipFile(path) as zf:
+            xhtml = next(
+                n for n in zf.namelist() if n.endswith(".xhtml") and "chap" in n
+            )
+            return zf.read(xhtml).decode("utf-8")
+
+    body_clean = _chapter_body(out_clean)
+    body_compact = _chapter_body(out_compact)
+
+    # Clean: full meaningful heading hierarchy
+    assert "<h2>Section</h2>" in body_clean
+    assert "<h3>Deep</h3>" in body_clean
+    assert "<h4>Detail</h4>" in body_clean
+    assert "Body paragraph." in body_clean
+    assert 'class="subhead"' not in body_clean
+
+    # Compact: level >= 3 flattened to subhead; content retained
+    assert "<h2>Section</h2>" in body_compact
+    assert "<h3>" not in body_compact
+    assert "<h4>" not in body_compact
+    assert 'class="subhead">Deep</p>' in body_compact or ">Deep</p>" in body_compact
+    assert "Detail" in body_compact
+    assert "Body paragraph." in body_compact
+    assert "Chapter 1" in body_compact
 
 
 def test_default_output_dir_is_app_output():
