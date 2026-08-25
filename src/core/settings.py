@@ -40,7 +40,7 @@ class OutputSettings(BaseModel):
     default_dir: str = ""
     same_as_input: bool = True
     after_completion: str = "nothing"  # nothing | sleep | shutdown | open_folder
-    # preserve | clean | simplified
+    # clean | compact
     conversion_mode: str = "clean"
 
 
@@ -50,17 +50,29 @@ class AppSettings(BaseModel):
     ai: AIConnectionSettings = Field(default_factory=AIConnectionSettings)
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
     output: OutputSettings = Field(default_factory=OutputSettings)
-    max_image_edge: int = 1600
-    extra: dict[str, Any] = Field(default_factory=dict)
 
-    def save(self, path: str | Path) -> None:
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.model_dump_json(indent=2), encoding="utf-8")
 
-    @classmethod
-    def load(cls, path: str | Path) -> "AppSettings":
-        path = Path(path)
-        if not path.exists():
-            return cls()
-        return cls.model_validate_json(path.read_text(encoding="utf-8"))
+def settings_path() -> Path:
+    from src.core.paths import app_dir
+
+    return app_dir() / "settings.json"
+
+
+def load_settings(path: Path | None = None) -> AppSettings:
+    p = path or settings_path()
+    if not p.is_file():
+        return AppSettings()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return AppSettings.model_validate(data)
+    except Exception:
+        return AppSettings()
+
+
+def save_settings(settings: AppSettings, path: Path | None = None) -> None:
+    p = path or settings_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps(settings.model_dump(), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
