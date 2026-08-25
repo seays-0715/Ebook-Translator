@@ -60,8 +60,7 @@ jobs:
             --name EbookTranslator `
             --paths . `
             --add-data "src/i18n/en.json;src/i18n" `
-            --add-data "src/i18n/zh-HK.json;src/i18n" `
-            --add-data "src/i18n/zh-TW.json;src/i18n" `
+            --add-data "src/i18n/zh-Hant.json;src/i18n" `
             --hidden-import customtkinter `
             --hidden-import ebooklib `
             --hidden-import bs4 `
@@ -96,7 +95,7 @@ jobs:
           hits = [n for n in names if "i18n" in n.replace("\\", "/").lower() or n.lower().endswith(".json")]
           for h in hits:
               print(h)
-          need = ["zh-HK.json", "zh-TW.json", "en.json"]
+          need = ["zh-Hant.json", "en.json"]
           missing = [n for n in need if not any(n in x.replace("\\", "/") for x in names)]
           if missing:
               raise SystemExit(f"Missing locale resources in EXE: {missing}")
@@ -104,13 +103,13 @@ jobs:
           '@
           python -c $script
 
-      - name: Verify i18n zh-HK without display
+      - name: Verify i18n zh-Hant without display
         shell: pwsh
         env:
           PYTHONIOENCODING: utf-8
         run: |
           $ErrorActionPreference = "Stop"
-          python -c "from src import i18n; i18n.set_language('zh-HK'); t=i18n.get('app_title'); expected='\u96fb\u5b50\u66f8\u7ffb\u8b6f\u5de5\u5177'; assert t==expected, repr(t); print('source zh-HK OK')"
+          python -c "from src import i18n; i18n.set_language('zh-Hant'); t=i18n.get('app_title'); expected='\u96fb\u5b50\u66f8\u7ffb\u8b6f\u5de5\u5177'; assert t==expected, repr(t); print('source zh-Hant OK')"
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
