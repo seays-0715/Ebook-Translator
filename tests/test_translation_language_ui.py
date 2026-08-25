@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.queue.batch_queue import BatchQueue
 from src.ui._mix_translate import TranslateMixin
 
 
