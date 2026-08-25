@@ -57,7 +57,7 @@ class ConvertMixin:
         from src.ui._common import _CONVERSION_MODE_CODES
         mode_labels = [_t(f"conversion_mode_{c}") for c in _CONVERSION_MODE_CODES]
         self._conversion_mode_var = ctk.StringVar(
-            value=_t(f"conversion_mode_{getattr(self.settings.output, 'conversion_mode', 'clean')}")
+            value=_t(f"conversion_mode_{getattr(self.settings.output, 'conversion_mode', 'standard')}")
         )
         self._conversion_mode_menu = ctk.CTkOptionMenu(
             mode_row, values=mode_labels, variable=self._conversion_mode_var, width=220
@@ -577,4 +577,4 @@ class ConvertMixin:
         for code in _CONVERSION_MODE_CODES:
             if label == _t(f"conversion_mode_{code}"):
                 return code
-        return getattr(self.settings.output, "conversion_mode", None) or "clean"
+        return getattr(self.settings.output, "conversion_mode", None) or "standard"
