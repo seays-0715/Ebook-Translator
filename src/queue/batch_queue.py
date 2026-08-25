@@ -289,10 +289,8 @@ class BatchQueue:
             self._process_item(item)
 
     def _mark_export_failure(self, item: QueueItem, exc: BaseException) -> None:
+        """Persist COMPLETED_WITH_ERRORS first; only then mutate in-memory state."""
         err = f"export_failed: {exc}"
-        with self._lock:
-            item.status = JobStatus.COMPLETED_WITH_ERRORS
-            item.error = err
         if item.job_id:
             self.storage.update_job_status(
                 item.job_id,
@@ -300,6 +298,9 @@ class BatchQueue:
                 error_summary=err,
                 finished=True,
             )
+        with self._lock:
+            item.status = JobStatus.COMPLETED_WITH_ERRORS
+            item.error = err
         self._emit(
             "item_export_failed",
             {
@@ -366,15 +367,17 @@ class BatchQueue:
                     self._mark_export_failure(item, ex)
         except Exception as e:
             logger.exception("queue item failed: %s", item.display_name)
-            with self._lock:
-                item.status = JobStatus.COMPLETED_WITH_ERRORS
-                item.error = str(e)
-                self._current_engine = None
-                self._current_item_id = None
+            # Persist before mutating queue-item memory so a failed write cannot
+            # leave COMPLETED_WITH_ERRORS in RAM while SQLite still has the old status.
             if item.job_id:
                 self.storage.update_job_status(
                     item.job_id,
                     JobStatus.COMPLETED_WITH_ERRORS,
                     error_summary=str(e),
                 )
+            with self._lock:
+                item.status = JobStatus.COMPLETED_WITH_ERRORS
+                item.error = str(e)
+                self._current_engine = None
+                self._current_item_id = None
             self._emit("item_error", {"item_id": item.item_id, "error": str(e)})
