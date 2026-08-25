@@ -50,3 +50,61 @@ def test_invalid_language_never_reaches_job_config():
     page = _config("auto", "Traditional Chinese")
     with pytest.raises(ValueError):
         page._translation_page_config()
+
+
+def test_invalid_persisted_source_selector_label_is_empty_not_ja():
+    label, err = TranslateMixin._selection_label_for_persisted_language("not-a-language")
+    assert label == ""
+    assert err is not None
+    assert "not-a-language" in err or "Unsupported" in err
+    # Must not silently become Japanese
+    assert label != "Japanese"
+    assert "ja" not in label.lower()
+
+
+def test_invalid_persisted_target_selector_label_is_empty_not_zh_hant():
+    label, err = TranslateMixin._selection_label_for_persisted_language("totally-bogus")
+    assert label == ""
+    assert err is not None
+    assert label != "Traditional Chinese"
+    assert "zh-Hant" not in label
+
+
+def test_valid_persisted_language_loads_normally():
+    label, err = TranslateMixin._selection_label_for_persisted_language("en")
+    assert err is None
+    assert label == "English"
+    label2, err2 = TranslateMixin._selection_label_for_persisted_language("zh-Hant")
+    assert err2 is None
+    assert label2 == "Traditional Chinese"
+
+
+def test_empty_selector_blocks_start_via_page_config():
+    page = _config("", "Traditional Chinese")
+    with pytest.raises(ValueError):
+        page._translation_page_config()
+
+
+def test_start_blocked_while_source_invalid():
+    page = _config("not-a-language", "English")
+    with pytest.raises(ValueError):
+        page._translation_page_config()
+
+
+def test_build_page_logic_does_not_embed_invalid_code_as_label():
+    """Source of truth for UI init: invalid code → empty label, not the raw code."""
+    from src.core.languages import normalize_code
+    from src.ui._common import language_code_to_label
+
+    raw = "xx-INVALID"
+    try:
+        code = normalize_code(raw)
+        label = language_code_to_label(code)
+    except ValueError:
+        code = None
+        label = ""
+    assert code is None
+    assert label == ""
+    assert label != "Japanese"
+    assert label != "Traditional Chinese"
+    assert label != raw
