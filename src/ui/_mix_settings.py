@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from tkinter import messagebox
 
+from src.core.settings import save_settings
 from src.ui._common import (
     _AFTER_CODES,
     _INTERFACE_LANG_CODES,
@@ -218,7 +219,7 @@ class SettingsMixin:
         field(
             "max_image_edge",
             "label_max_image_edge",
-            str(self.settings.max_image_edge),
+            str(self.settings.output.max_image_edge),
         )
 
         def _get(key: str) -> str:
@@ -275,8 +276,8 @@ class SettingsMixin:
                 if "output_dir" in entries:
                     self.settings.output.default_dir = _get("output_dir")
                 self.settings.interface_language = _get("interface_language") or ""
-                self.settings.max_image_edge = _get_int("max_image_edge", 1600)
-                self.settings.save(self.settings_path)
+                self.settings.output.max_image_edge = _get_int("max_image_edge", 1600)
+                save_settings(self.settings, self.settings_path)
             except Exception as e:
                 log.exception("settings save failed")
                 self._show_error("error", str(e))
