@@ -40,8 +40,8 @@ class OutputSettings(BaseModel):
     default_dir: str = ""
     same_as_input: bool = True
     after_completion: str = "nothing"  # nothing | sleep | shutdown | open_folder
-    # clean | compact
-    conversion_mode: str = "clean"
+    # standard | compact
+    conversion_mode: str = "standard"
 
 
 class AppSettings(BaseModel):

@@ -16,11 +16,11 @@ from src import i18n
 
 log = logging.getLogger("ebook_translator.ui")
 
-_INTERFACE_LANG_CODES = ("", "zh-HK", "zh-TW", "en")
+_INTERFACE_LANG_CODES = ("", "zh-Hant", "en")
 _SOURCE_LANG_CODES = ("auto", "en", "ja", "zh", "zh-CN", "zh-TW", "ko", "fr", "de", "es")
 _TARGET_LANG_CODES = ("zh-TW", "zh-HK", "zh-CN", "en", "ja", "ko")
 _STYLE_CODES = ("fiction", "nonfiction")
-_CONVERSION_MODE_CODES = ("clean", "compact")
+_CONVERSION_MODE_CODES = ("standard", "compact")
 _AFTER_CODES = ("nothing", "sleep", "shutdown", "open_folder")
 
 
