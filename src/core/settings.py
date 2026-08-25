@@ -42,6 +42,8 @@ class OutputSettings(BaseModel):
     after_completion: str = "nothing"  # nothing | sleep | shutdown | open_folder
     # standard | compact
     conversion_mode: str = "standard"
+    # Max image edge (px) for EPUB asset resize
+    max_image_edge: int = 1600
 
 
 class AppSettings(BaseModel):
