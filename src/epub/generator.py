@@ -20,7 +20,7 @@ def generate_epub(
     output_path: str | Path,
     *,
     assets_base: Path | None = None,
-    conversion_mode: str = "clean",
+    conversion_mode: str = "standard",
 ) -> Path:
     """Generate EPUB. Returns final path. Uses atomic write."""
     output_path = Path(output_path)
@@ -114,15 +114,15 @@ def generate_epub(
     return output_path
 
 
-def _chapter_html(chapter, image_items: dict, conversion_mode: str = "clean") -> str:
+def _chapter_html(chapter, image_items: dict, conversion_mode: str = "standard") -> str:
     """Render chapter body. Mode affects presentation hierarchy, not only CSS.
 
-    - clean (default): keep meaningful heading levels (1–6) as in the
+    - standard (default): keep meaningful heading levels (1–6) as in the
       normalized canonical book
     - compact: deeper headings (level >= 3) become paragraph subheads;
       heading text, chapters, paragraphs, and reading order are retained
     """
-    mode = (conversion_mode or "clean").strip().lower()
+    mode = (conversion_mode or "standard").strip().lower()
     parts: list[str] = []
     parts.append('<div class="chapter">')
     parts.append(f"<h1>{escape(chapter.title or '')}</h1>")
@@ -157,19 +157,19 @@ def _chapter_html(chapter, image_items: dict, conversion_mode: str = "clean") ->
     return "\n".join(parts)
 
 
-def _css(layout: Layout, conversion_mode: str = "clean") -> str:
+def _css(layout: Layout, conversion_mode: str = "standard") -> str:
     """Typography CSS for V1 EPUB export.
 
     Modes:
-    - clean (default): comfortable normal reading spacing
+    - standard (default): comfortable normal reading spacing
     - compact: tighter spacing paired with simplified visual hierarchy
     """
-    mode = (conversion_mode or "clean").strip().lower()
+    mode = (conversion_mode or "standard").strip().lower()
     direction = "vertical-rl" if layout == Layout.VERTICAL else "horizontal-tb"
 
     if mode == "compact":
         line_h, body_margin, p_margin, p_indent, h1_size = "1.55", "0.9em 1.1em", "0 0 0.7em 0", "1.25em", "1.4em"
-    else:  # clean
+    else:  # standard
         line_h, body_margin, p_margin, p_indent, h1_size = "1.75", "1.25em 1.5em", "0 0 0.95em 0", "1.5em", "1.55em"
 
     return f"""
