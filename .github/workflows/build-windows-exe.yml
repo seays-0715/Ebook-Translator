@@ -42,7 +42,7 @@ jobs:
             "--name", "EbookTranslator",
             "--paths", ".",
             "--add-data", "src/i18n/en.json;src/i18n",
-            "--add-data", "src/i18n/zh-HK.json;src/i18n",
+            "--add-data", "src/i18n/zh-Hant.json;src/i18n",
             "--hidden-import", "customtkinter",
             "--hidden-import", "ebooklib",
             "--hidden-import", "bs4",
