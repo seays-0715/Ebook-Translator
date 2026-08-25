@@ -1,13 +1,4 @@
-"""Centralized language registry for translation UI and jobs.
-
-Source of truth: current Hy-MT2 supported-language table
-(https://huggingface.co/unsloth/Hy-MT2-7B-GGUF — 38 entries including
-Traditional Chinese and Cantonese).
-
-UI displays human-readable names; jobs/API use stable codes.
-There is no Auto Detect — the user always selects source and target.
-Unknown or empty codes raise ValueError (no silent fallback).
-"""
+"""Centralized language registry for translation UI and jobs."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,7 +10,6 @@ class Language:
     name_en: str
 
 
-# Official codes from the current Hy-MT2 model card table (order preserved).
 LANGUAGES: tuple[Language, ...] = (
     Language("zh", "Chinese"),
     Language("en", "English"),
@@ -63,14 +53,6 @@ LANGUAGES: tuple[Language, ...] = (
 
 _BY_CODE: dict[str, Language] = {lang.code: lang for lang in LANGUAGES}
 
-# Alternate codes → registry codes (no "auto"; unknown codes raise).
-_ALIASES: dict[str, str] = {
-    "zh-TW": "zh-Hant",
-    "zh-HK": "zh-Hant",
-    "zh-CN": "zh",
-    "zh-Hans": "zh",
-}
-
 
 def all_codes() -> list[str]:
     return [lang.code for lang in LANGUAGES]
@@ -81,7 +63,7 @@ def all_display_names() -> list[str]:
 
 
 def normalize_code(code: str | None) -> str:
-    """Resolve aliases and validate. Raises ValueError if unsupported."""
+    """Validate a canonical supported language code. Raises ValueError otherwise."""
     if code is None:
         raise ValueError("Unsupported language code: None")
     c = code.strip()
@@ -89,22 +71,17 @@ def normalize_code(code: str | None) -> str:
         raise ValueError("Unsupported language code: ''")
     if c in _BY_CODE:
         return c
-    if c in _ALIASES:
-        return _ALIASES[c]
     lower = c.lower()
     for k, lang in _BY_CODE.items():
         if k.lower() == lower:
             return lang.code
-    if lower in _ALIASES:
-        return _ALIASES[lower]
     raise ValueError(f"Unsupported language code: {code!r}")
 
 
 def code_to_name(code: str | None) -> str:
     """Human-readable English name for prompts and UI."""
     c = normalize_code(code)
-    lang = _BY_CODE.get(c)
-    return lang.name_en if lang else c
+    return _BY_CODE[c].name_en
 
 
 def name_to_code(name: str | None) -> str | None:
