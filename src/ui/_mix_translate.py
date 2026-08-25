@@ -66,6 +66,7 @@ class TranslateMixin:
             gloss_row, text=_t("refresh"), width=70, command=self._refresh_glossary_dropdowns
         ).pack(side="left", padx=4)
 
+        # Translation-task config (Source / Target / Style / Prompt) — not Settings
         cfg_row = ctk.CTkFrame(page)
         cfg_row.pack(fill="x", pady=4, padx=4)
 
@@ -129,6 +130,7 @@ class TranslateMixin:
         )
         self._tr_style_menu.pack(side="left", padx=2)
 
+        # Prompt editor (task-level; frozen into Job at Start)
         prompt_hdr = ctk.CTkFrame(page)
         prompt_hdr.pack(fill="x", padx=4, pady=(4, 0))
         ctk.CTkLabel(prompt_hdr, text=_t("label_prompt"), font=("", 12, "bold")).pack(
@@ -144,6 +146,7 @@ class TranslateMixin:
         self._tr_prompt_box.pack(fill="x", padx=4, pady=2)
         self._load_prompt_for_style(st_code)
 
+        # Queue item list with lifecycle actions
         mid = ctk.CTkFrame(page)
         mid.pack(fill="both", expand=False, pady=4)
         ctk.CTkLabel(mid, text=_t("queue_items"), font=("", 13, "bold")).pack(anchor="w")
@@ -250,36 +253,81 @@ class TranslateMixin:
 
             top = ctk.CTkFrame(frame)
             top.pack(fill="x")
-            ctk.CTkLabel(top, text=f"{name}  [{st}]", anchor="w", width=320).pack(side="left", padx=4)
+            ctk.CTkLabel(
+                top, text=f"{name}  [{st}]", anchor="w", width=320
+            ).pack(side="left", padx=4)
 
             if item.status == JobStatus.PENDING:
-                ctk.CTkButton(top, text=_t("remove"), width=70, command=lambda iid=item.item_id: self._queue_remove(iid)).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("remove"), width=70,
+                    command=lambda iid=item.item_id: self._queue_remove(iid),
+                ).pack(side="right", padx=2)
             elif item.status == JobStatus.PROCESSING:
-                ctk.CTkButton(top, text=_t("pause"), width=70, command=lambda iid=item.item_id: self._queue_pause_job(iid)).pack(side="right", padx=2)
-                ctk.CTkButton(top, text=_t("cancel"), width=70, command=lambda iid=item.item_id: self._queue_cancel(iid)).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("pause"), width=70,
+                    command=lambda iid=item.item_id: self._queue_pause_job(iid),
+                ).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("cancel"), width=70,
+                    command=lambda iid=item.item_id: self._queue_cancel(iid),
+                ).pack(side="right", padx=2)
             elif item.status == JobStatus.PAUSED:
-                ctk.CTkButton(top, text=_t("resume"), width=70, command=lambda iid=item.item_id: self._queue_resume_job(iid)).pack(side="right", padx=2)
-                ctk.CTkButton(top, text=_t("cancel"), width=70, command=lambda iid=item.item_id: self._queue_cancel(iid)).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("resume"), width=70,
+                    command=lambda iid=item.item_id: self._queue_resume_job(iid),
+                ).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("cancel"), width=70,
+                    command=lambda iid=item.item_id: self._queue_cancel(iid),
+                ).pack(side="right", padx=2)
             elif item.status == JobStatus.COMPLETED:
                 out = (item.output_path or "").strip()
                 if out:
-                    ctk.CTkLabel(frame, text=_t("output_path_line", path=out), anchor="w").pack(fill="x", padx=8)
-                ctk.CTkButton(top, text=_t("open_file_action"), width=80, command=lambda path=out: self._open_path(path, folder=False)).pack(side="right", padx=2)
-                ctk.CTkButton(top, text=_t("open_folder_action"), width=90, command=lambda path=out: self._open_path(path, folder=True)).pack(side="right", padx=2)
-                ctk.CTkButton(top, text=_t("remove"), width=70, command=lambda iid=item.item_id: self._queue_remove(iid)).pack(side="right", padx=2)
+                    ctk.CTkLabel(
+                        frame,
+                        text=_t("output_path_line", path=out),
+                        anchor="w",
+                    ).pack(fill="x", padx=8)
+                ctk.CTkButton(
+                    top, text=_t("open_file_action"), width=80,
+                    command=lambda path=out: self._open_path(path, folder=False),
+                ).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("open_folder_action"), width=90,
+                    command=lambda path=out: self._open_path(path, folder=True),
+                ).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("remove"), width=70,
+                    command=lambda iid=item.item_id: self._queue_remove(iid),
+                ).pack(side="right", padx=2)
             elif item.status == JobStatus.COMPLETED_WITH_ERRORS:
                 summary = self._readable_error_summary(item)
                 if summary:
-                    ctk.CTkLabel(frame, text=summary, anchor="w").pack(fill="x", padx=8)
-                ctk.CTkButton(top, text=_t("retry"), width=70, command=lambda iid=item.item_id: self._queue_retry(iid)).pack(side="right", padx=2)
-                ctk.CTkButton(top, text=_t("remove"), width=70, command=lambda iid=item.item_id: self._queue_remove(iid)).pack(side="right", padx=2)
+                    ctk.CTkLabel(frame, text=summary, anchor="w").pack(
+                        fill="x", padx=8
+                    )
+                ctk.CTkButton(
+                    top, text=_t("retry"), width=70,
+                    command=lambda iid=item.item_id: self._queue_retry(iid),
+                ).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("remove"), width=70,
+                    command=lambda iid=item.item_id: self._queue_remove(iid),
+                ).pack(side="right", padx=2)
             elif item.status == JobStatus.CANCELLED:
-                ctk.CTkButton(top, text=_t("remove"), width=70, command=lambda iid=item.item_id: self._queue_remove(iid)).pack(side="right", padx=2)
+                ctk.CTkButton(
+                    top, text=_t("remove"), width=70,
+                    command=lambda iid=item.item_id: self._queue_remove(iid),
+                ).pack(side="right", padx=2)
 
     def _queue_remove(self, item_id: str) -> None:
         if not self._queue:
             return
-        delete = messagebox.askyesno(_t("confirm"), _t("remove_job_delete_data_q"), parent=self.root)
+        delete = messagebox.askyesno(
+            _t("confirm"),
+            _t("remove_job_delete_data_q"),
+            parent=self.root,
+        )
         try:
             self._queue.remove(item_id, delete_job_data=bool(delete))
         except Exception as e:
@@ -329,30 +377,57 @@ class TranslateMixin:
                 done = completed + failed
                 pct = int(100 * done / total)
                 self.progress_bar.set(done / total)
-                self.lbl_chunk.configure(text=_t("progress_chunk", current=done, total=total))
-                self.lbl_overall.configure(text=_t("progress_overall", percent=pct))
+                self.lbl_chunk.configure(
+                    text=_t("progress_chunk", current=done, total=total)
+                )
+                self.lbl_overall.configure(
+                    text=_t("progress_overall", percent=pct)
+                )
             elif event == "item_exported":
-                self.translate_log.insert("end", _t("progress_exported", path=data.get("output")) + "\n")
+                self.translate_log.insert(
+                    "end",
+                    _t("progress_exported", path=data.get("output")) + "\n",
+                )
             elif event == "item_export_failed":
-                self.translate_log.insert("end", _t("export_failed_msg") + "\n")
+                self.translate_log.insert(
+                    "end",
+                    _t("export_failed_msg") + "\n",
+                )
             elif event == "item_error":
-                self.translate_log.insert("end", _t("translation_failed_msg") + "\n")
+                self.translate_log.insert(
+                    "end",
+                    _t("translation_failed_msg") + "\n",
+                )
             elif event == "queue_finished":
                 self.progress_label.configure(text=_t("queue_finished"))
                 out_dir = self._translate_output_dir
-                after_completion_action(self.settings.output.after_completion, output_folder=out_dir)
+                after_completion_action(
+                    self.settings.output.after_completion,
+                    output_folder=out_dir,
+                )
+
         self.root.after(0, ui)
 
     def _translation_page_config(self) -> tuple[str, str, str]:
-        """Read Source / Target / Style from Translation page controls."""
+        """Read Source / Target / Style from Translation page controls.
+
+        Returns stable language codes (registry) and style code.
+        Raises ValueError if source/target language is invalid.
+        """
         style = "fiction"
-        src = language_label_to_code(self._tr_src_var.get())
-        tgt = language_label_to_code(self._tr_tgt_var.get())
+        lab = self._tr_src_var.get()
+        src = language_label_to_code(lab)
+        lab = self._tr_tgt_var.get()
+        tgt = language_label_to_code(lab)
         try:
-            style = self._tr_style_l2c.get(self._tr_style_var.get(), "fiction")
+            lab = self._tr_style_var.get()
+            style = self._tr_style_l2c.get(lab, "fiction")
         except Exception:
             style = getattr(self.settings.translation, "style", None) or "fiction"
-        style = "nonfiction" if "non" in str(style).lower() else "fiction"
+        if "non" in str(style).lower():
+            style = "nonfiction"
+        else:
+            style = "fiction"
         src = normalize_code(src)
         tgt = normalize_code(tgt)
         return src, tgt, style
@@ -410,7 +485,9 @@ class TranslateMixin:
         try:
             paths = filedialog.askopenfilenames(
                 parent=self.root,
-                filetypes=ebook_filetypes(_t("filetypes_ebook"), _t("filetypes_epub"), _t("filetypes_all")),
+                filetypes=ebook_filetypes(
+                    _t("filetypes_ebook"), _t("filetypes_epub"), _t("filetypes_all")
+                ),
             )
         except Exception as e:
             self._show_error("error_open_file", str(e))
@@ -421,22 +498,34 @@ class TranslateMixin:
             self._translate_output_dir = self._resolved_output_dir()
         else:
             from src.ui.paths import resolve_output_dir
-            self._translate_output_dir = resolve_output_dir(getattr(self.settings.output, "default_dir", None))
+
+            self._translate_output_dir = resolve_output_dir(
+                getattr(self.settings.output, "default_dir", None)
+            )
         self._ensure_queue()
         assert self._queue is not None
         for p in paths:
             path = Path(p)
-            self._queue.add(path, self._translate_output_dir / f"{path.stem}.translated.epub", display_name=path.name)
+            self._queue.add(
+                path,
+                self._translate_output_dir / f"{path.stem}.translated.epub",
+                display_name=path.name,
+            )
         self._refresh_queue_list()
-        self.translate_log.insert("end", _t("queued_books", count=len(paths)) + "\n")
+        self.translate_log.insert(
+            "end", _t("queued_books", count=len(paths)) + "\n"
+        )
 
     def _start_queue(self) -> None:
         self._ensure_queue()
         assert self._queue is not None
         if not self._queue.items():
-            messagebox.showinfo(_t("info"), _t("add_books_output_first"), parent=self.root)
+            messagebox.showinfo(
+                _t("info"), _t("add_books_output_first"), parent=self.root
+            )
             return
         try:
+            # Validate languages before creating/starting jobs
             try:
                 src, tgt, style = self._translation_page_config()
             except ValueError as ve:
@@ -448,9 +537,11 @@ class TranslateMixin:
                 self.settings.translation.style = style
                 self._persist_translate_prompt(style, self._read_translate_prompt())
                 from src.core.settings import save_settings
+
                 save_settings(self.settings, self.settings_path)
             except Exception:
                 log.exception("persist translation page defaults")
+            # Freeze current Translation-page task config into queue for NEW jobs only.
             if hasattr(self, "_job_config_from_settings"):
                 self._queue.config = self._job_config_from_settings()
             self._queue.glossary = self._selected_glossary_entries()
@@ -470,13 +561,17 @@ class TranslateMixin:
 
     def _watch_queue(self) -> None:
         import time
+
         while self._queue and self._queue.status.value == "running":
             time.sleep(0.5)
             w = self._queue._worker
             if w and not w.is_alive():
                 break
         if self._queue:
-            self._queue.emit("queue_finished", {"status": self._queue.status.value})
+            self._queue.emit(
+                "queue_finished",
+                {"status": self._queue.status.value},
+            )
 
     def _pause_queue(self) -> None:
         if self._queue:
@@ -495,7 +590,9 @@ class TranslateMixin:
         labels = [none_label]
         self._gloss_label_to_id: dict[str, str] = {}
         try:
-            store = getattr(self, "glossary_store", None) or getattr(self, "_glossary_store", None)
+            store = getattr(self, "glossary_store", None) or getattr(
+                self, "_glossary_store", None
+            )
             if store is not None:
                 for gid in store.list_ids():
                     try:
@@ -521,7 +618,9 @@ class TranslateMixin:
         """Merge confirmed entries from the two independent selector slots."""
         entries: list[dict[str, str]] = []
         seen: set[str] = set()
-        store = getattr(self, "glossary_store", None) or getattr(self, "_glossary_store", None)
+        store = getattr(self, "glossary_store", None) or getattr(
+            self, "_glossary_store", None
+        )
         if store is None:
             return entries
         mapping = getattr(self, "_gloss_label_to_id", {}) or {}
