@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -15,11 +15,7 @@ from src.queue.batch_queue import BatchQueue, QueueError
 
 def _make_queue(tmp_path: Path) -> BatchQueue:
     storage = Storage(tmp_path / "app.db")
-    return BatchQueue(
-        storage=storage,
-        work_root=tmp_path / "work",
-        config=JobConfig(),
-    )
+    return BatchQueue(storage=storage, work_root=tmp_path / "work", config=JobConfig())
 
 
 def test_queue_remove_pending(tmp_path: Path):
@@ -67,23 +63,30 @@ def test_remove_delete_job_data(tmp_path: Path):
         assets={},
     )
     q.storage.save_book(book, book_id=job_id)
-    job = TranslationJob(job_id=job_id, book=book, status=JobStatus.COMPLETED)
-    q.storage.save_job(job)
+    q.storage.save_job(TranslationJob(job_id=job_id, book=book, status=JobStatus.COMPLETED))
     item.job_id = job_id
     item.status = JobStatus.COMPLETED
     q.remove(item.item_id, delete_job_data=True)
-    try:
-        loaded = q.storage.load_job(job_id)
-        assert loaded is None
-    except KeyError:
-        pass  # deleted
+    with pytest.raises(KeyError):
+        q.storage.load_job(job_id)
+
+
+def test_remove_delete_failure_keeps_item(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.job_id = "job-1"
+    item.status = JobStatus.COMPLETED
+    with patch.object(q.storage, "delete_job", side_effect=OSError("disk full")):
+        with pytest.raises(OSError, match="disk full"):
+            q.remove(item.item_id, delete_job_data=True)
+    assert q.items()[0].item_id == item.item_id
 
 
 def test_queue_cancel_pending(tmp_path: Path):
     q = _make_queue(tmp_path)
     item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
     q.cancel_job(item.item_id)
-    assert q.items()[0].status == JobStatus.CANCELLED
+    assert item.status == JobStatus.CANCELLED
 
 
 def test_cancel_paused(tmp_path: Path):
@@ -92,6 +95,15 @@ def test_cancel_paused(tmp_path: Path):
     item.status = JobStatus.PAUSED
     q.cancel(item.item_id)
     assert item.status == JobStatus.CANCELLED
+
+
+def test_cancel_pending_persistence_failure_keeps_state(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    with patch.object(q.storage, "update_job_status", side_effect=OSError("db locked")):
+        with pytest.raises(OSError, match="db locked"):
+            q.cancel(item.item_id)
+    assert item.status == JobStatus.PENDING
 
 
 def test_pause_job_calls_request_pause_on_engine(tmp_path: Path):
@@ -112,6 +124,15 @@ def test_pause_job_rejects_pending(tmp_path: Path):
         q.pause_job(item.item_id)
 
 
+def test_pause_processing_without_engine_is_rejected(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.status = JobStatus.PROCESSING
+    with pytest.raises(QueueError, match="active TranslationEngine"):
+        q.pause_job(item.item_id)
+    assert item.status == JobStatus.PROCESSING
+
+
 def test_cancel_processing_calls_request_stop(tmp_path: Path):
     q = _make_queue(tmp_path)
     item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
@@ -121,16 +142,25 @@ def test_cancel_processing_calls_request_stop(tmp_path: Path):
     q._current_item_id = item.item_id
     q.cancel(item.item_id)
     engine.request_stop.assert_called_once()
-    # Final CANCELLED is owned by engine return — still PROCESSING until then
     assert item.status == JobStatus.PROCESSING
 
 
-def test_queue_resume_job(tmp_path: Path):
+def test_cancel_processing_without_engine_is_rejected(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.status = JobStatus.PROCESSING
+    with pytest.raises(QueueError, match="active TranslationEngine"):
+        q.cancel(item.item_id)
+    assert item.status == JobStatus.PROCESSING
+
+
+def test_queue_resume_cancelled_is_rejected(tmp_path: Path):
     q = _make_queue(tmp_path)
     item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
     q.cancel_job(item.item_id)
-    q.resume_job(item.item_id)
-    assert q.items()[0].status == JobStatus.PENDING
+    with pytest.raises(QueueError, match="only for PAUSED"):
+        q.resume_job(item.item_id)
+    assert item.status == JobStatus.CANCELLED
 
 
 def test_resume_paused_to_pending(tmp_path: Path):
@@ -139,6 +169,16 @@ def test_resume_paused_to_pending(tmp_path: Path):
     item.status = JobStatus.PAUSED
     q.resume_job(item.item_id)
     assert item.status == JobStatus.PENDING
+
+
+def test_resume_persistence_failure_keeps_state(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.status = JobStatus.PAUSED
+    with patch.object(q.storage, "update_job_status", side_effect=OSError("db locked")):
+        with pytest.raises(OSError, match="db locked"):
+            q.resume_job(item.item_id)
+    assert item.status == JobStatus.PAUSED
 
 
 def test_retry_job_reuses_job_id(tmp_path: Path):
@@ -152,6 +192,19 @@ def test_retry_job_reuses_job_id(tmp_path: Path):
     assert item.status == JobStatus.PENDING
     assert item.error is None
     assert item.job_id == frozen
+
+
+def test_retry_persistence_failure_keeps_state(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.status = JobStatus.COMPLETED_WITH_ERRORS
+    item.error = "failed"
+    item.job_id = "job-1"
+    with patch.object(q.storage, "update_job_status", side_effect=OSError("db locked")):
+        with pytest.raises(OSError, match="db locked"):
+            q.retry_job(item.item_id)
+    assert item.status == JobStatus.COMPLETED_WITH_ERRORS
+    assert item.error == "failed"
 
 
 def test_retry_rejects_wrong_status(tmp_path: Path):
@@ -197,11 +250,7 @@ def test_queue_add_with_book_snapshot(tmp_path: Path):
                 id="ch1",
                 title="Only Chapter",
                 order=0,
-                blocks=[
-                    ContentBlock(
-                        id="p0", type=BlockType.PARAGRAPH, order=0, text="Hi"
-                    )
-                ],
+                blocks=[ContentBlock(id="p0", type=BlockType.PARAGRAPH, order=0, text="Hi")],
             )
         ],
         assets={},

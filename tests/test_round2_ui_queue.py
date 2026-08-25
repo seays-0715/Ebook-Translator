@@ -14,10 +14,9 @@ def test_retry_job_reuses_job_id_and_clears_error(tmp_path: Path):
     q = BatchQueue(
         storage=storage,
         work_root=tmp_path / "work",
-        config=JobConfig(source_language="ja", target_language="zh-TW", style="fiction"),
+        config=JobConfig(source_language="ja", target_language="zh-Hant", style="fiction"),
     )
     item = q.add(tmp_path / "a.epub", tmp_path / "a.translated.epub", display_name="A")
-    # Simulate completed-with-errors with frozen job id
     item.status = JobStatus.COMPLETED_WITH_ERRORS
     item.error = "export_failed: disk full"
     item.job_id = "job-" + uuid4().hex[:8]
@@ -62,9 +61,7 @@ def test_chapter_list_label_is_title_only():
         ContentBlock(
             id="h0", type=BlockType.HEADING, order=0, text="Chapter One", level=1
         ),
-        ContentBlock(
-            id="p0", type=BlockType.PARAGRAPH, order=1, text=body
-        ),
+        ContentBlock(id="p0", type=BlockType.PARAGRAPH, order=1, text=body),
     ]
     ch = Chapter(id="c1", title="Chapter One", order=0, blocks=blocks)
     n_blocks = len(ch.blocks)
@@ -74,8 +71,6 @@ def test_chapter_list_label_is_title_only():
     assert "Chapter One" in label
     assert body not in label
     assert "long body paragraph" not in label
-    # Block count must not appear (e.g. "(2)" or "2 blocks")
     assert f"({n_blocks})" not in label
     assert "blocks" not in label.lower()
-    # Parentheses used only for block stats previously — none expected
     assert "(" not in label and ")" not in label

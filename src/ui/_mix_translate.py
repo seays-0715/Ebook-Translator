@@ -82,14 +82,17 @@ class TranslateMixin:
         style_labels = [_style_label(c) for c in style_codes]
         self._tr_style_l2c = dict(zip(style_labels, style_codes))
 
+        invalid_languages: list[str] = []
         try:
-            src_code = normalize_code(ts.source_language or "ja")
-        except ValueError:
-            src_code = "ja"
+            src_code = normalize_code(ts.source_language)
+        except ValueError as exc:
+            src_code = (ts.source_language or "").strip()
+            invalid_languages.append(f"source: {exc}")
         try:
-            tgt_code = normalize_code(ts.target_language or "zh-Hant")
-        except ValueError:
-            tgt_code = "zh-Hant"
+            tgt_code = normalize_code(ts.target_language)
+        except ValueError as exc:
+            tgt_code = (ts.target_language or "").strip()
+            invalid_languages.append(f"target: {exc}")
 
         ctk.CTkLabel(cfg_row, text=_t("label_source_lang")).pack(side="left", padx=4)
         self._tr_src_var = ctk.StringVar(value=language_code_to_label(src_code))
@@ -102,6 +105,17 @@ class TranslateMixin:
         ctk.CTkOptionMenu(
             cfg_row, variable=self._tr_tgt_var, values=lang_labels, width=160
         ).pack(side="left", padx=2)
+
+        if invalid_languages:
+            self._translation_config_error = "; ".join(invalid_languages)
+            ctk.CTkLabel(
+                page,
+                text=f"Invalid translation language configuration: {self._translation_config_error}",
+                anchor="w",
+                wraplength=900,
+            ).pack(fill="x", padx=8, pady=(0, 4))
+        else:
+            self._translation_config_error = None
 
         ctk.CTkLabel(cfg_row, text=_t("label_style")).pack(side="left", padx=4)
         st = (ts.style or "fiction").lower()
@@ -176,10 +190,6 @@ class TranslateMixin:
             custom = getattr(self.settings.translation, "fiction_prompt", "") or ""
         if custom.strip():
             return custom
-        # Also honor legacy single prompt field
-        legacy = (self.settings.translation.prompt or "").strip()
-        if legacy:
-            return legacy
         return default_prompt_for_style(style_code)
 
     def _load_prompt_for_style(self, style_code: str) -> None:
@@ -228,7 +238,6 @@ class TranslateMixin:
             self.settings.translation.nonfiction_prompt = custom
         else:
             self.settings.translation.fiction_prompt = custom
-        self.settings.translation.prompt = custom
 
     def _refresh_queue_list(self) -> None:
         ctk = _ctk()
@@ -419,7 +428,6 @@ class TranslateMixin:
             style = "nonfiction"
         else:
             style = "fiction"
-        # Domain validation (strict)
         src = normalize_code(src)
         tgt = normalize_code(tgt)
         return src, tgt, style

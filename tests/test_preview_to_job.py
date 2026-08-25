@@ -52,7 +52,7 @@ def test_job_uses_normalized_book_not_reparse(tmp_path: Path):
         book = merge_adjacent(book, book.chapters[0].id, book.chapters[1].id)
 
     storage = Storage(tmp_path / "app.db")
-    cfg = JobConfig(target_language="zh-TW")
+    cfg = JobConfig(target_language="zh-Hant")
     job = create_translation_job(
         None,
         storage,

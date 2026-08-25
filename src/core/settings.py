@@ -29,8 +29,6 @@ class TranslationSettings(BaseModel):
     style: str = "fiction"
     chunk_target_tokens: int = 1000
     carry_over_paragraphs: int = 2
-    # Empty = use built-in default for the selected style
-    prompt: str = ""
     # Per-style saved custom prompts (persist across restarts)
     fiction_prompt: str = ""
     nonfiction_prompt: str = ""

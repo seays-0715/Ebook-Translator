@@ -528,26 +528,15 @@ class ConvertMixin:
             style = (self.settings.translation.style or "fiction").lower()
             style = "nonfiction" if "non" in style else "fiction"
 
-        # Prefer live Translate-page prompt textbox
+        # Prompt comes only from the Translation page's style-specific editor.
         custom = ""
         if hasattr(self, "_read_translate_prompt"):
-            try:
-                custom = self._read_translate_prompt() or ""
-            except Exception:
-                custom = ""
+            custom = self._read_translate_prompt() or ""
         if not custom.strip():
             if style == "nonfiction":
-                custom = (
-                    self.settings.translation.prompt
-                    or getattr(self.settings.translation, "nonfiction_prompt", "")
-                    or ""
-                )
+                custom = getattr(self.settings.translation, "nonfiction_prompt", "") or ""
             else:
-                custom = (
-                    self.settings.translation.prompt
-                    or getattr(self.settings.translation, "fiction_prompt", "")
-                    or ""
-                )
+                custom = getattr(self.settings.translation, "fiction_prompt", "") or ""
         prompt = resolve_system_prompt(style, custom or None)
         return JobConfig(
             source_language=normalize_code(src),

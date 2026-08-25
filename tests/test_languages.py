@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.core.languages import (
-    LANGUAGES,
-    normalize_code,
-    code_to_name,
-    name_to_code,
-)
+from src.core.languages import LANGUAGES, normalize_code, code_to_name, name_to_code
 
 
 def test_registry_count():
@@ -22,11 +17,15 @@ def test_normalize_known():
     assert normalize_code("en") == "en"
 
 
-def test_normalize_aliases():
-    assert normalize_code("zh-TW") == "zh-Hant"
-    assert normalize_code("zh-HK") == "zh-Hant"
-    assert normalize_code("zh-CN") == "zh"
-    assert normalize_code("zh-Hans") == "zh"
+def test_normalize_rejects_noncanonical_aliases():
+    with pytest.raises(ValueError, match="Unsupported language code"):
+        normalize_code("zh-TW")
+    with pytest.raises(ValueError, match="Unsupported language code"):
+        normalize_code("zh-HK")
+    with pytest.raises(ValueError, match="Unsupported language code"):
+        normalize_code("zh-CN")
+    with pytest.raises(ValueError, match="Unsupported language code"):
+        normalize_code("zh-Hans")
 
 
 def test_normalize_rejects_auto():
