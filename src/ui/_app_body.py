@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from src import i18n
-from src.core.settings import AppSettings
+from src.core.settings import AppSettings, load_settings
 from src.core.storage import Storage
 from src.glossary.store import GlossaryStore
 from src.models.book import CanonicalBook
@@ -24,7 +24,7 @@ class App(ConvertMixin, TranslateMixin, GlossaryMixin, SettingsMixin):
         ctk.set_appearance_mode("system")
         ctk.set_default_color_theme("blue")
         self.settings_path = settings_path or (data_dir() / "settings.json")
-        self.settings = AppSettings.load(self.settings_path)
+        self.settings = load_settings(self.settings_path)
         if self.settings.interface_language:
             i18n.set_language(self.settings.interface_language)
         else:

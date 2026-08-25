@@ -13,12 +13,14 @@ except ImportError:  # pragma: no cover
     ctk = None  # type: ignore
 
 from src import i18n
+from src.core.languages import all_display_names, display_pairs, name_to_code
 
 log = logging.getLogger("ebook_translator.ui")
 
 _INTERFACE_LANG_CODES = ("", "zh-Hant", "en")
-_SOURCE_LANG_CODES = ("auto", "en", "ja", "zh", "zh-CN", "zh-TW", "ko", "fr", "de", "es")
-_TARGET_LANG_CODES = ("zh-TW", "zh-HK", "zh-CN", "en", "ja", "ko")
+# Legacy convert-page code lists (registry codes preferred via language helpers)
+_SOURCE_LANG_CODES = ("en", "ja", "zh", "zh-Hant", "ko", "fr", "de", "es")
+_TARGET_LANG_CODES = ("zh-Hant", "zh", "en", "ja", "ko")
 _STYLE_CODES = ("fiction", "nonfiction")
 _CONVERSION_MODE_CODES = ("standard", "compact")
 _AFTER_CODES = ("nothing", "sleep", "shutdown", "open_folder")
@@ -34,6 +36,30 @@ def _ctk():
 
 def _t(key: str, **kwargs) -> str:
     return i18n.get(key, **kwargs)
+
+
+def language_display_labels() -> list[str]:
+    """English display names for translation language OptionMenus."""
+    return all_display_names()
+
+
+def language_code_to_label(code: str) -> str:
+    """Map registry code to English display name; falls back to code."""
+    for name, c in display_pairs():
+        if c == code:
+            return name
+    return code
+
+
+def language_label_to_code(label: str) -> str:
+    """Map English display name (or code) to registry code.
+
+    Raises ValueError if the label is not a known language.
+    """
+    code = name_to_code(label)
+    if code is None:
+        raise ValueError(f"Unsupported language code: {label!r}")
+    return code
 
 
 def format_chapter_list_label(order: int, title: str | None) -> str:
