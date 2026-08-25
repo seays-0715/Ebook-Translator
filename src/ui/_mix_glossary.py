@@ -23,6 +23,7 @@ class GlossaryMixin:
         for text_key, cmd in [
             ("create", self._gloss_create),
             ("rename", self._gloss_rename),
+            ("add_entry", self._gloss_add_entry),
             ("build_from_pair", self._gloss_build),
             ("import", self._gloss_import),
             ("export", self._gloss_export),
@@ -92,13 +93,40 @@ class GlossaryMixin:
             g.name = new_name.strip()
             self.glossary_store.save(g)
             self._gloss_refresh()
-            # Keep Translate-page dropdowns in sync
             try:
                 self._refresh_glossary_dropdowns()
             except Exception:
                 pass
         except Exception as e:
             log.exception("glossary rename failed")
+            self._show_error("error", str(e))
+
+    def _gloss_add_entry(self) -> None:
+        gid = getattr(self, "_selected_glossary_id", None)
+        if not gid:
+            messagebox.showinfo(_t("info"), _t("select_glossary_first"), parent=self.root)
+            return
+        src = simpledialog.askstring(
+            _t("add_entry"), _t("entry_source"), parent=self.root
+        )
+        if src is None or not str(src).strip():
+            return
+        tgt = simpledialog.askstring(
+            _t("add_entry"), _t("entry_target"), parent=self.root
+        )
+        if tgt is None:
+            return
+        try:
+            self.glossary_store.add_entry(
+                gid, str(src).strip(), str(tgt).strip(), confirmed=True
+            )
+            self._gloss_refresh()
+            try:
+                self._refresh_glossary_dropdowns()
+            except Exception:
+                pass
+        except Exception as e:
+            log.exception("glossary add entry failed")
             self._show_error("error", str(e))
 
     def _gloss_import(self) -> None:
@@ -272,10 +300,10 @@ class GlossaryMixin:
                             row, text=_t("confirm"), width=60,
                             command=lambda i=e.id: self._gloss_confirm_entry(i),
                         ).pack(side="right", padx=1)
-                        ctk.CTkButton(
-                            row, text=_t("reject"), width=60,
-                            command=lambda i=e.id: self._gloss_reject_entry(i),
-                        ).pack(side="right", padx=1)
+                    ctk.CTkButton(
+                        row, text=_t("delete"), width=60,
+                        command=lambda i=e.id: self._gloss_reject_entry(i),
+                    ).pack(side="right", padx=1)
                     ctk.CTkButton(
                         row, text=_t("edit"), width=50,
                         command=lambda i=e.id: self._gloss_edit_entry(i),
