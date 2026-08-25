@@ -108,3 +108,23 @@ def test_build_page_logic_does_not_embed_invalid_code_as_label():
     assert label != "Japanese"
     assert label != "Traditional Chinese"
     assert label != raw
+
+
+def test_no_invalid_translation_language_configuration_banner():
+    """User-facing UI must not show developer configuration error text."""
+    source = Path("src/ui/_mix_translate.py").read_text(encoding="utf-8")
+    assert "Invalid translation language configuration" not in source
+    assert "_translation_config_error" not in source
+
+
+def test_language_selector_labels_exclude_internal_aliases():
+    from src.ui._common import language_display_labels
+
+    labels = language_display_labels()
+    joined = " | ".join(labels)
+    assert "zh-TW" not in joined
+    assert "zh-HK" not in joined
+    assert "zh-Hant" not in joined  # registry code, not display name
+    assert "Traditional Chinese" in labels
+    assert "Auto Detect" not in labels
+    assert "auto" not in {x.lower() for x in labels}
