@@ -9,13 +9,32 @@ from uuid import uuid4
 import pytest
 
 from src.core.storage import Storage
-from src.models.job import JobConfig, JobStatus
+from src.models.book import BookMetadata, CanonicalBook, Layout
+from src.models.job import JobConfig, JobStatus, TranslationJob
 from src.queue.batch_queue import BatchQueue, QueueError
 
 
 def _make_queue(tmp_path: Path) -> BatchQueue:
     storage = Storage(tmp_path / "app.db")
     return BatchQueue(storage=storage, work_root=tmp_path / "work", config=JobConfig())
+
+
+def _book() -> CanonicalBook:
+    return CanonicalBook(
+        metadata=BookMetadata(title="T", author="A", language="en"),
+        layout=Layout.HORIZONTAL,
+        chapters=[],
+        assets={},
+    )
+
+
+def _persist_job(q: BatchQueue, item, status: JobStatus = JobStatus.PENDING) -> str:
+    job_id = item.job_id or ("job-" + uuid4().hex[:8])
+    book = _book()
+    q.storage.save_book(book, book_id=job_id)
+    q.storage.save_job(TranslationJob(job_id=job_id, book=book, status=status))
+    item.job_id = job_id
+    return job_id
 
 
 def test_queue_remove_pending(tmp_path: Path):
@@ -52,19 +71,7 @@ def test_remove_completed_and_cancelled(tmp_path: Path):
 def test_remove_delete_job_data(tmp_path: Path):
     q = _make_queue(tmp_path)
     item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
-    from src.models.book import BookMetadata, CanonicalBook, Layout
-    from src.models.job import TranslationJob
-
-    job_id = "job-" + uuid4().hex[:8]
-    book = CanonicalBook(
-        metadata=BookMetadata(title="T", author="A", language="en"),
-        layout=Layout.HORIZONTAL,
-        chapters=[],
-        assets={},
-    )
-    q.storage.save_book(book, book_id=job_id)
-    q.storage.save_job(TranslationJob(job_id=job_id, book=book, status=JobStatus.COMPLETED))
-    item.job_id = job_id
+    job_id = _persist_job(q, item, JobStatus.COMPLETED)
     item.status = JobStatus.COMPLETED
     q.remove(item.item_id, delete_job_data=True)
     with pytest.raises(KeyError):
@@ -100,6 +107,7 @@ def test_cancel_paused(tmp_path: Path):
 def test_cancel_pending_persistence_failure_keeps_state(tmp_path: Path):
     q = _make_queue(tmp_path)
     item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    _persist_job(q, item, JobStatus.PENDING)
     with patch.object(q.storage, "update_job_status", side_effect=OSError("db locked")):
         with pytest.raises(OSError, match="db locked"):
             q.cancel(item.item_id)
@@ -175,6 +183,7 @@ def test_resume_persistence_failure_keeps_state(tmp_path: Path):
     q = _make_queue(tmp_path)
     item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
     item.status = JobStatus.PAUSED
+    _persist_job(q, item, JobStatus.PAUSED)
     with patch.object(q.storage, "update_job_status", side_effect=OSError("db locked")):
         with pytest.raises(OSError, match="db locked"):
             q.resume_job(item.item_id)
@@ -239,8 +248,8 @@ def test_no_jobstatus_failed_in_module():
 
 
 def test_queue_add_with_book_snapshot(tmp_path: Path):
-    from src.models.book import BookMetadata, CanonicalBook, Chapter, Layout
     from src.models.blocks import BlockType, ContentBlock
+    from src.models.book import Chapter
 
     book = CanonicalBook(
         metadata=BookMetadata(title="Snap Book", author="A", language="en"),
@@ -264,3 +273,54 @@ def test_queue_add_with_book_snapshot(tmp_path: Path):
     )
     assert item.book is not None
     assert item.display_name == "Snap Book"
+
+
+def test_export_failure_becomes_completed_with_errors(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub", book=_book())
+    _persist_job(q, item, JobStatus.PENDING)
+
+    engine = MagicMock()
+    engine.run.return_value = JobStatus.COMPLETED
+    with (
+        patch("src.queue.batch_queue.TranslationEngine", return_value=engine),
+        patch(
+            "src.queue.batch_queue.export_job_epub",
+            side_effect=OSError("disk full"),
+        ),
+    ):
+        q._process_item(item)
+
+    assert item.status == JobStatus.COMPLETED_WITH_ERRORS
+    assert item.error is not None
+    assert "export_failed" in item.error
+    assert "disk full" in item.error
+
+
+def test_export_failure_is_persisted(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub", book=_book())
+    job_id = _persist_job(q, item, JobStatus.PENDING)
+
+    engine = MagicMock()
+    engine.run.return_value = JobStatus.COMPLETED
+    with (
+        patch("src.queue.batch_queue.TranslationEngine", return_value=engine),
+        patch(
+            "src.queue.batch_queue.export_job_epub",
+            side_effect=OSError("disk full"),
+        ),
+    ):
+        q._process_item(item)
+
+    persisted = q.storage.load_job(job_id)
+    assert persisted.status == JobStatus.COMPLETED_WITH_ERRORS
+    assert persisted.error_summary is not None
+    assert "export_failed" in persisted.error_summary
+    assert "disk full" in persisted.error_summary
+
+    reopened = Storage(tmp_path / "app.db")
+    disk = reopened.load_job(job_id)
+    assert disk.status == JobStatus.COMPLETED_WITH_ERRORS
+    assert disk.error_summary is not None
+    assert "export_failed" in disk.error_summary
