@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
@@ -35,9 +34,7 @@ class QueueItem:
     job_id: str | None = None
     status: JobStatus = JobStatus.PENDING
     error: str | None = None
-    priority: int = 0  # lower = higher priority; insertion order as tiebreak
-    # Optional pre-normalized Canonical Book (Preview corrections). When set,
-    # Job creation uses this snapshot and does not re-parse source_path.
+    priority: int = 0
     book: object | None = None
     display_name: str = ""
 
@@ -62,8 +59,6 @@ class BatchQueue:
         self._current_engine: TranslationEngine | None = None
         self._stop_flag = False
         self._pause_flag = False
-
-    # ------------------------------------------------------------------ public
 
     @property
     def status(self) -> QueueStatus:
@@ -107,6 +102,10 @@ class BatchQueue:
     def remove(self, item_id: str) -> None:
         with self._lock:
             self._items = [i for i in self._items if i.item_id != item_id]
+
+    def cancel_job(self, item_id: str) -> None:
+        """Alias used by UI / tests."""
+        self.cancel(item_id)
 
     def cancel(self, item_id: str) -> None:
         with self._lock:
