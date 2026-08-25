@@ -46,8 +46,8 @@ class BatchQueue:
     config: JobConfig
     glossary: list[dict[str, str]] = field(default_factory=list)
     on_progress: ProgressCallback | None = None
-    # clean | compact — passed through to EPUB export
-    conversion_mode: str = "clean"
+    # standard | compact — passed through to EPUB export
+    conversion_mode: str = "standard"
 
     def __post_init__(self) -> None:
         self.work_root = Path(self.work_root)
@@ -277,7 +277,7 @@ class BatchQueue:
                             item.job_id,
                             item.output_path,
                             force=(status == JobStatus.COMPLETED_WITH_ERRORS),
-                            conversion_mode=self.conversion_mode or "clean",
+                            conversion_mode=self.conversion_mode or "standard",
                         )
                     except Exception as ex:
                         logger.exception("export failed")
