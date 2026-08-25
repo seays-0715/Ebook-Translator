@@ -1,7 +1,8 @@
-"""Key-based i18n. V1: zh-HK, zh-TW, en.
+"""Key-based i18n. UI locales: en, zh-Hant (Traditional Chinese).
 
 Spec §42.5: system detection; manual override via Settings.
 JSON under this package / PyInstaller _MEIPASS; embedded tables as fallback.
+Interface language is independent of translation source/target languages.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from pathlib import Path
 
 _CACHE: dict[str, dict[str, str]] = {}
 _CURRENT = "en"
-_SUPPORTED = ("en", "zh-HK", "zh-TW")
+_SUPPORTED = ("en", "zh-Hant")
 
 _EMBEDDED_EN: dict[str, str] = {
     "app_title": "Ebook Translator",
@@ -123,6 +124,7 @@ _EMBEDDED_EN: dict[str, str] = {
     "restart_prompt": "Interface language will apply after restart. Restart now?",
     "lang_zh_hk": "Traditional Chinese (Hong Kong)",
     "lang_zh_tw": "Traditional Chinese (Taiwan)",
+    "lang_zh_hant": "Traditional Chinese",
     "lang_en": "English",
     "lang_auto": "System default",
     "style_auto": "Auto Detect",
@@ -267,6 +269,7 @@ _EMBEDDED_ZH_HK: dict[str, str] = {
     "restart_prompt": "\u4ecb\u9762\u8a9e\u8a00\u5c07\u5728\u91cd\u65b0\u555f\u52d5\u5f8c\u751f\u6548\u3002\u8981\u7acb\u5373\u91cd\u555f\u55ce\uff1f",
     "lang_zh_hk": "\u7e41\u9ad4\u4e2d\u6587\uff08\u9999\u6e2f\uff09",
     "lang_zh_tw": "\u7e41\u9ad4\u4e2d\u6587\uff08\u53f0\u7063\uff09",
+    "lang_zh_hant": "\u7e41\u9ad4\u4e2d\u6587",
     "lang_en": "English",
     "lang_auto": "\u8ddf\u96a8\u7cfb\u7d71",
     "style_auto": "\u81ea\u52d5\u5075\u6e2c",
@@ -336,9 +339,6 @@ def _candidate_dirs() -> list[Path]:
 
 def _load_file(lang: str) -> dict[str, str]:
     names = [f"{lang}.json"]
-    # zh-TW falls back to zh-HK file if dedicated file missing
-    if lang == "zh-TW":
-        names.append("zh-HK.json")
     if "-" in lang:
         names.append(f"{lang.split('-')[0]}.json")
     for d in _candidate_dirs():
@@ -355,7 +355,7 @@ def _load_file(lang: str) -> dict[str, str]:
 
 
 def _embedded(lang: str) -> dict[str, str]:
-    if lang in ("zh-HK", "zh-TW"):
+    if lang == "zh-Hant":
         return dict(_EMBEDDED_ZH_HK)
     return dict(_EMBEDDED_EN)
 
@@ -371,6 +371,7 @@ def _load(lang: str) -> dict[str, str]:
 
 
 def _normalize_to_ui_lang(raw: str | None) -> str | None:
+    """Map system/settings strings to a supported UI locale code."""
     if not raw:
         return None
     s = raw.strip().replace("_", "-")
@@ -381,14 +382,22 @@ def _normalize_to_ui_lang(raw: str | None) -> str | None:
         return None
     if lower == "en" or lower.startswith("en-"):
         return "en"
-    if lower in ("zh-tw", "zh-hant-tw") or "zh-tw" in lower:
-        return "zh-TW"
-    if lower in ("zh-hk", "zh-hant-hk", "zh-mo") or "zh-hk" in lower:
-        return "zh-HK"
-    if any(tok in lower for tok in ("hant", "cht", "zh-hant")):
-        return "zh-HK"
+    # Any Traditional Chinese / generic Chinese → single UI locale zh-Hant
+    if any(
+        tok in lower
+        for tok in (
+            "zh-hant",
+            "zh-tw",
+            "zh-hk",
+            "zh-mo",
+            "hant",
+            "cht",
+        )
+    ) or lower in ("zh-tw", "zh-hk", "zh-mo", "zh-hant"):
+        return "zh-Hant"
     if lower == "zh" or lower.startswith("zh-") or lower.startswith("chi"):
-        return "zh-HK"
+        # Prefer Traditional for UI when only "zh" is reported (HK/TW users)
+        return "zh-Hant"
     if lower in _SUPPORTED:
         return lower
     return None
@@ -408,12 +417,9 @@ def _windows_ui_language() -> str | None:
         primary = lang_id & 0x3FF
         if primary == 0x04:
             sub = (lang_id >> 10) & 0x3F
-            if sub == 0x01:  # Traditional Taiwan
-                return "zh-TW"
-            if sub in (0x03, 0x05):  # HK / Macau
-                return "zh-HK"
             if sub == 0x02:
-                return "zh-Hans"
+                return "zh-Hans"  # Simplified → normalize maps non-Hant zh
+            # Taiwan / HK / Macau / generic Traditional
             return "zh-Hant"
         if primary == 0x09:
             return "en"
