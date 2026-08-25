@@ -26,7 +26,7 @@ def convert_file(
     """Parse → Canonical Book → EPUB (no translation).
 
     conversion_mode is passed through to the generator:
-      preserve | clean (default) | simplified
+      clean (default) | compact
     """
     source = Path(source)
     assets_dir = assets_dir or source.parent / f".assets_{source.stem}"
@@ -149,7 +149,7 @@ def export_job_epub(
       - force=False → raise, keep checkpoints
       - force=True  → export anyway (Force Export, spec §32.3)
     Level 3 checks the written file.
-    conversion_mode is passed through to the generator (preserve|clean|simplified).
+    conversion_mode is passed through to the generator (clean|compact).
     """
     job = storage.load_job(job_id)
     object.__setattr__(job, "_book_id", job_id)
