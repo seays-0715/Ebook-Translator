@@ -21,12 +21,12 @@ def convert_file(
     output: str | Path,
     *,
     assets_dir: Path | None = None,
-    conversion_mode: str = "clean",
+    conversion_mode: str = "standard",
 ) -> Path:
     """Parse → Canonical Book → EPUB (no translation).
 
     conversion_mode is passed through to the generator:
-      clean (default) | compact
+      standard (default) | compact
     """
     source = Path(source)
     assets_dir = assets_dir or source.parent / f".assets_{source.stem}"
@@ -40,7 +40,7 @@ def convert_file(
         result.book,
         output,
         assets_base=assets_dir,
-        conversion_mode=conversion_mode or "clean",
+        conversion_mode=conversion_mode or "standard",
     )
 
 
@@ -141,7 +141,7 @@ def export_job_epub(
     output: str | Path,
     *,
     force: bool = False,
-    conversion_mode: str = "clean",
+    conversion_mode: str = "standard",
 ) -> Path:
     """Export translated EPUB.
 
@@ -149,7 +149,7 @@ def export_job_epub(
       - force=False → raise, keep checkpoints
       - force=True  → export anyway (Force Export, spec §32.3)
     Level 3 checks the written file.
-    conversion_mode is passed through to the generator (clean|compact).
+    conversion_mode is passed through to the generator (standard|compact).
     """
     job = storage.load_job(job_id)
     object.__setattr__(job, "_book_id", job_id)
@@ -168,7 +168,7 @@ def export_job_epub(
         )
 
     out = generate_epub(
-        book, output, conversion_mode=conversion_mode or "clean"
+        book, output, conversion_mode=conversion_mode or "standard"
     )
     level3 = validate_epub_file(out)
     if not level3.ok and not force:
