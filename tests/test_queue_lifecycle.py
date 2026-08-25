@@ -72,11 +72,19 @@ def test_remove_delete_job_data(tmp_path: Path):
     item.job_id = job_id
     item.status = JobStatus.COMPLETED
     q.remove(item.item_id, delete_job_data=True)
-    try:
-        loaded = q.storage.load_job(job_id)
-        assert loaded is None
-    except KeyError:
-        pass  # deleted
+    with pytest.raises(KeyError):
+        q.storage.load_job(job_id)
+
+
+def test_remove_delete_failure_keeps_item(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.job_id = "job-missing"
+    item.status = JobStatus.COMPLETED
+    with pytest.raises(Exception):
+        q.remove(item.item_id, delete_job_data=True)
+    assert len(q.items()) == 1
+    assert q.items()[0].status == JobStatus.COMPLETED
 
 
 def test_queue_cancel_pending(tmp_path: Path):
@@ -92,6 +100,15 @@ def test_cancel_paused(tmp_path: Path):
     item.status = JobStatus.PAUSED
     q.cancel(item.item_id)
     assert item.status == JobStatus.CANCELLED
+
+
+def test_cancel_pending_persistence_failure_keeps_state(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.job_id = "job-missing"
+    with pytest.raises(Exception):
+        q.cancel(item.item_id)
+    assert item.status == JobStatus.PENDING
 
 
 def test_pause_job_calls_request_pause_on_engine(tmp_path: Path):
@@ -112,6 +129,15 @@ def test_pause_job_rejects_pending(tmp_path: Path):
         q.pause_job(item.item_id)
 
 
+def test_pause_processing_without_engine_is_rejected(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.status = JobStatus.PROCESSING
+    with pytest.raises(QueueError, match="active TranslationEngine"):
+        q.pause_job(item.item_id)
+    assert item.status == JobStatus.PROCESSING
+
+
 def test_cancel_processing_calls_request_stop(tmp_path: Path):
     q = _make_queue(tmp_path)
     item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
@@ -121,16 +147,25 @@ def test_cancel_processing_calls_request_stop(tmp_path: Path):
     q._current_item_id = item.item_id
     q.cancel(item.item_id)
     engine.request_stop.assert_called_once()
-    # Final CANCELLED is owned by engine return — still PROCESSING until then
     assert item.status == JobStatus.PROCESSING
 
 
-def test_queue_resume_job(tmp_path: Path):
+def test_cancel_processing_without_engine_is_rejected(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.status = JobStatus.PROCESSING
+    with pytest.raises(QueueError, match="active TranslationEngine"):
+        q.cancel(item.item_id)
+    assert item.status == JobStatus.PROCESSING
+
+
+def test_queue_resume_cancelled_is_rejected(tmp_path: Path):
     q = _make_queue(tmp_path)
     item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
     q.cancel_job(item.item_id)
-    q.resume_job(item.item_id)
-    assert q.items()[0].status == JobStatus.PENDING
+    with pytest.raises(QueueError, match="only for PAUSED"):
+        q.resume_job(item.item_id)
+    assert item.status == JobStatus.CANCELLED
 
 
 def test_resume_paused_to_pending(tmp_path: Path):
@@ -139,6 +174,16 @@ def test_resume_paused_to_pending(tmp_path: Path):
     item.status = JobStatus.PAUSED
     q.resume_job(item.item_id)
     assert item.status == JobStatus.PENDING
+
+
+def test_resume_persistence_failure_keeps_state(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.status = JobStatus.PAUSED
+    item.job_id = "job-missing"
+    with pytest.raises(Exception):
+        q.resume_job(item.item_id)
+    assert item.status == JobStatus.PAUSED
 
 
 def test_retry_job_reuses_job_id(tmp_path: Path):
@@ -152,6 +197,18 @@ def test_retry_job_reuses_job_id(tmp_path: Path):
     assert item.status == JobStatus.PENDING
     assert item.error is None
     assert item.job_id == frozen
+
+
+def test_retry_persistence_failure_keeps_state(tmp_path: Path):
+    q = _make_queue(tmp_path)
+    item = q.add(tmp_path / "a.epub", tmp_path / "a.out.epub")
+    item.status = JobStatus.COMPLETED_WITH_ERRORS
+    item.error = "failed"
+    item.job_id = "job-missing"
+    with pytest.raises(Exception):
+        q.retry_job(item.item_id)
+    assert item.status == JobStatus.COMPLETED_WITH_ERRORS
+    assert item.error == "failed"
 
 
 def test_retry_rejects_wrong_status(tmp_path: Path):
