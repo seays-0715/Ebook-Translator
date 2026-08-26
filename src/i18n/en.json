@@ -171,5 +171,8 @@
   "delete": "Delete",
   "label_backend": "AI Backend / Provider",
   "label_model_identifier": "Model Identifier",
-  "prompt_saved": "Prompt saved for this style."
+  "prompt_saved": "Prompt saved for this style.",
+  "continue": "Continue",
+  "continue_started": "Continue started",
+  "unfinished_jobs": "Unfinished jobs"
 }
