@@ -186,5 +186,8 @@
   "delete": "刪除",
   "label_backend": "AI 後端 / 提供者",
   "label_model_identifier": "模型識別碼",
-  "prompt_saved": "此風格的提示詞已儲存。"
+  "prompt_saved": "此風格的提示詞已儲存。",
+  "continue": "繼續",
+  "continue_started": "已開始繼續",
+  "unfinished_jobs": "未完成工作"
 }
