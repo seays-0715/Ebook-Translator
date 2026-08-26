@@ -209,6 +209,8 @@ class ConvertOpsMixin:
             glossary=gloss_entries,
             on_progress=self._queue_progress,
         )
+        # Restore unfinished jobs from SQLite so they survive EXE restart.
+        self._queue.restore_incomplete_jobs()
         return self._queue
 
     def _job_config_from_settings(self) -> JobConfig:
